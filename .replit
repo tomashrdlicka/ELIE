@@ -1,0 +1,1 @@
+run = "pip install -e . && python elie/app.py"
