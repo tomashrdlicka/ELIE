@@ -9,3 +9,6 @@ dependencies = [
     "dash>=3.0.4",
     "numpy",
 ]
+
+[project.optional-dependencies]
+modal = ["modal>=0.1.0"] 
