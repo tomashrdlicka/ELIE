@@ -24,7 +24,13 @@ def update_output(n_clicks):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
-    # bind to 0.0.0.0 on the Replit-assigned port (defaults to 3000)
-    port = int(os.environ.get("PORT", 3000))
-    app.run(host="0.0.0.0", port=port)
+    # common: pick up whatever PORT Replit (or any host) gives you
+    port = int(os.environ.get("PORT", 8050))
+    # if we're on Replit deployment, bind 0.0.0.0; otherwise default host
+    is_replit = bool(os.environ.get("REPLIT_DEPLOYMENT"))
+    host = "0.0.0.0" if is_replit else "127.0.0.1"
+
+    # debug locally, turn it off on Replit
+    debug = not is_replit
+
+    app.run(host=host, port=port, debug=debug)
