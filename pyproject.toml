@@ -8,4 +8,5 @@ dependencies = [
     "dash-bootstrap-components>=2.0.3",
     "dash>=3.0.4",
     "numpy",
+    "requests",
 ]

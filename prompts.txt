@@ -1,3 +1,0 @@
-**Fetch terms Prompt:**
-
-Given that I want to understand quaternions, give me a comma-separated list of concepts which are necessary to understand quaternions. Do not include anything else in your answer. Give me only 5 general concepts to start.

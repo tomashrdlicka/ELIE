@@ -128,7 +128,7 @@ def generate_figure():
                 edge_ys += [py, y, None]
         elif node != "start":
             label += f" ({breadth})"
-        sizes.append(100 * breadth)
+        sizes.append(80 * breadth)
         labels.append(label)
         if node == "start":
             colors.append("black")
