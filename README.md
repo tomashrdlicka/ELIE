@@ -1,6 +1,7 @@
 # ELIE
 
-**Explain Like I'm an Expert**: a spin on "Explain Like I'm 5"—but for people who want expert-level nuance.
+![alt text](logo.jpg)
+a spin on "Explain Like I'm 5"—but for people who want expert-level nuance.
 
 Check it out at [elie-zii2.onrender.com](https://elie-zii2.onrender.com/) or [try it out locally](#to-run-locally).
 
