@@ -6,19 +6,34 @@ import random
 import json
 from dash import ctx
 import base64
+from elie.llm_calls import call_modal_llm, build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt
 
 app = dash.Dash(__name__)
 server = app.server
 
 # === Graph State ===
-# Initialization moved after function definitions
+# Initialize with only the center node and no children
+node_data = {
+    "start": {"parent": None, "distance": 0.0, "label": ""}
+}
+clicked_nodes = set()
+unclicked_nodes = []
+clicked_nodes_list = []
 
-explanation_paragraph = (
-    "Quaternions are a number system that extends complex numbers. "
-    "They are commonly used to represent rotations in 3D space, as they avoid gimbal lock "
-    "and provide smooth interpolation (slerp). A quaternion is composed of one real part and "
-    "three imaginary parts: q = w + xi + yj + zk."
-)
+# Placeholder for the How It Works markdown (fill in from README)
+HOW_IT_WORKS_MD = """## How It Works
+
+1. **Pick a topic:** Type in something you want to learn—say, "quaternions".
+
+2. **Get a baseline:** ELIE shows you an initial explanation and a web of related concepts (e.g. "complex numbers", "rotation", "linear algebra").
+
+3. **Click what you know:** Select any familiar node—e.g. "linear algebra"—and ELIE refines the explanation.
+
+4. **Iterate to expertise:** Keep choosing known concepts; the map updates and the explanation sharpens until it's perfectly pitched to your expertise.
+"""
+
+
+explanation_paragraph = HOW_IT_WORKS_MD
 
 def generate_children(term, count=3):
     """Generate 3 children and store in node_data with normalized distance."""
@@ -63,7 +78,7 @@ def recompute_all_distances():
             norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
             data["breadth"] = norm_breadth
 
-def build_positions(base_spacing=3.0):
+def build_positions(base_spacing=4.0):
     positions = {}
 
     def dfs(node, depth=0, angle=0.0, spread=np.pi * 2):
@@ -108,6 +123,7 @@ def generate_figure():
     positions = rescale_positions(positions, target_radius=10.0)
     xs, ys, labels, colors = [], [], [], []
     edge_xs, edge_ys = [], []
+    edge_colors = []
     sizes = []
 
     for node, (x, y) in positions.items():
@@ -120,12 +136,15 @@ def generate_figure():
         parent = node_data[node]["parent"]
         breadth = node_data[node].get("breadth", 1.0)
         if parent:
-            dist = node_data[node]["distance"]
-            label += f" ({dist}, {breadth})"
             if parent in positions:
                 px, py = positions[parent]
                 edge_xs += [px, x, None]
                 edge_ys += [py, y, None]
+                # Edge color: green if node is clicked, else gray
+                if node in clicked_nodes:
+                    edge_colors.append('rgba(2,171,19,0.35)')
+                else:
+                    edge_colors.append('#888')
         elif node != "start":
             label += f" ({breadth})"
         sizes.append(80 * breadth)
@@ -148,13 +167,20 @@ def generate_figure():
     x_range = [center_x - spread, center_x + spread]
     y_range = [center_y - spread, center_y + spread]
 
-    edge_trace = go.Scatter(
-        x=edge_xs,
-        y=edge_ys,
-        mode="lines",
-        line=dict(width=2, color="#888"),
-        hoverinfo="none"
-    )
+    # Draw edges with per-segment color
+    edge_traces = []
+    edge_idx = 0
+    for i in range(0, len(edge_xs), 3):
+        color = edge_colors[edge_idx] if edge_idx < len(edge_colors) else '#888'
+        edge_traces.append(go.Scatter(
+            x=edge_xs[i:i+2],
+            y=edge_ys[i:i+2],
+            mode="lines",
+            line=dict(width=2, color=color),
+            hoverinfo="none",
+            showlegend=False
+        ))
+        edge_idx += 1
 
     node_trace = go.Scatter(
         x=xs,
@@ -193,97 +219,77 @@ def generate_figure():
         )]
     )
 
-    return go.Figure(data=[edge_trace, node_trace], layout=layout)
-
-# === Graph State ===
-# Initialize with 'start' and 4 children
-node_data = {
-    "start": {"parent": None, "distance": 0.0}
-}
-total = 5  # 1 root + 4 children
-for i in range(4):
-    child = f"start_child_{i}"
-    raw_dist = round(random.uniform(0.5, 1.5), 2)
-    norm_dist = raw_dist / total * 6
-    norm_dist = max(0.1, min(1.0, round(norm_dist * 10) / 10))
-    raw_breadth = round(random.uniform(0.5, 1.5), 2)
-    norm_breadth = raw_breadth / total * 6
-    norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
-    node_data[child] = {
-        "parent": "start",
-        "distance": norm_dist,
-        "raw_distance": raw_dist,
-        "breadth": norm_breadth,
-        "raw_breadth": raw_breadth
-    }
-clicked_nodes = set()
-unclicked_nodes = [k for k in node_data.keys() if k != "start"]
-clicked_nodes_list = []
-recompute_all_distances()
+    return go.Figure(data=edge_traces + [node_trace], layout=layout)
 
 # === Dash Layout ===
 app.layout = html.Div([
     html.H2(
         "ELIE (Explain Like I'm an Expert)",
         style={
-            "textAlign": "center",
+            "textAlign": "left",
             "width": "100%",
-            "marginBottom": "18px"
+            "marginLeft": "40px"
         }
     ),
-
+    dcc.Store(id="input-overlay-visible", data=True),
     html.Div([
-        html.Button(
-            "Reset Graph",
-            id="reset-btn",
-            n_clicks=0,
-            style={
-                "padding": "10px 22px",
-                "fontSize": "1.08em",
-                "borderRadius": "7px",
-                "backgroundColor": "#e0e7ef",
-                "border": "1px solid #b0b8c1",
-                "color": "#222",
-                "cursor": "pointer",
-                "transition": "background 0.2s, color 0.2s"
-            }
-        ),
-        dcc.Input(
-            id="start-input",
-            type="text",
-            placeholder="Enter root concept...",
-            debounce=True,
-            n_submit=0,
-            style={
-                "padding": "10px 22px",
-                "fontSize": "1.08em",
-                "borderRadius": "7px",
-                "backgroundColor": "#e0e7ef",
-                "border": "1px solid #b0b8c1",
-                "color": "#222",
-                "transition": "background 0.2s, color 0.2s"
-            }
-        ),
-        html.Button(
-            "Submit",
-            id="submit-btn",
-            n_clicks=0,
-            style={
-                "padding": "10px 22px",
-                "fontSize": "1.08em",
-                "borderRadius": "7px",
-                "backgroundColor": "#e0e7ef",
-                "border": "1px solid #b0b8c1",
-                "color": "#222",
-                "cursor": "pointer",
-                "transition": "background 0.2s, color 0.2s"
-            }
-        ),
-    ], style={"display": "flex", "gap": "10px", "alignItems": "center", "marginBottom": "20px"}),
-
-    html.Div([
-        dcc.Graph(id="graph", figure=generate_figure(), style={"flex": "3 1 0%"}),
+        # Graph and overlay input
         html.Div([
+            dcc.Graph(id="graph", figure=generate_figure(), style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}),
+            # Overlay input centered on graph
+            html.Div(
+                dcc.Input(
+                    id="start-input",
+                    type="text",
+                    placeholder="Enter root concept...",
+                    debounce=True,
+                    n_submit=0,
+                    style={
+                        "padding": "12px 28px",
+                        "fontSize": "1.18em",
+                        "borderRadius": "9px",
+                        "backgroundColor": "#e0e7ef",
+                        "border": "1.5px solid #b0b8c1",
+                        "color": "#222",
+                        "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
+                        "outline": "none",
+                        "width": "340px",
+                        "textAlign": "center",
+                        "marginTop": "4.5em",
+                        "marginRight": "15.0em"
+                    }
+                ),
+                id="centered-input-overlay",
+                style={
+                    "position": "fixed",
+                    "left": "50%",
+                    "top": "50%",
+                    "transform": "translate(-70%, -50%)",
+                    "zIndex": 10,
+                    "pointerEvents": "auto"
+                }
+            ),
+        ], style={"flex": "3 1 0%", "position": "relative", "minHeight": "700px"}),
+        html.Div([
+            html.Button(
+                "Reset Term",
+                id="reset-term-btn",
+                n_clicks=0,
+                style={
+                    "padding": "10px 22px",
+                    "fontSize": "1.08em",
+                    "borderRadius": "7px",
+                    "backgroundColor": "#e0e7ef",
+                    "border": "1px solid #b0b8c1",
+                    "color": "#222",
+                    "cursor": "pointer",
+                    "transition": "background 0.2s, color 0.2s",
+                    "width": "auto%",
+                    "display": "block",
+                    "marginBottom": "10px"
+                    
+                }
+            ),
             html.Div([
                 html.Button(
                     "Save Graph",
@@ -323,9 +329,8 @@ app.layout = html.Div([
             html.Div(
                 id="info-box",
                 children=[
-                    html.H4("ℹ️ About Quaternions"),
-                    html.P(explanation_paragraph),
-                    html.Div(id="knowledge-box")
+                    html.H4("Welcome to ELIE!"),
+                    dcc.Markdown(explanation_paragraph),
                 ],
                 style={
                     "border": "1px solid #ccc",
@@ -342,28 +347,49 @@ app.layout = html.Div([
             )
         ], style={"display": "flex", "flexDirection": "column", "alignItems": "stretch", "flex": "1 1 0%"})
     ], style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start"}),
-    
     dcc.Store(id="last-clicked", data="start"),
 ])
 
 @app.callback(
-    Output("graph", "figure"),
-    Output("last-clicked", "data"),
-    Output("info-box", "children"),
-    Output("upload-graph", "contents"),
-    Input("graph", "clickData"),
-    Input("reset-btn", "n_clicks"),
-    Input("submit-btn", "n_clicks"),
-    Input("start-input", "n_submit"),
-    Input("upload-graph", "contents"),
-    State("start-input", "value"),
-    State("last-clicked", "data")
+    [
+        Output("graph", "figure"),
+        Output("last-clicked", "data"),
+        Output("info-box", "children"),
+        Output("upload-graph", "contents"),
+        Output("input-overlay-visible", "data"),
+        Output("start-input", "value"),
+    ],
+    [
+        Input("graph", "clickData"),
+        Input("start-input", "n_submit"),
+        Input("upload-graph", "contents"),
+        Input("reset-term-btn", "n_clicks")
+    ],
+    [
+        State("start-input", "value"),
+        State("last-clicked", "data")
+    ]
 )
-def handle_interaction(clickData, reset_clicks, submit_clicks, input_submit, upload_contents, user_input, last_clicked):
+def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, user_input, last_clicked):
     global node_data, clicked_nodes, unclicked_nodes, clicked_nodes_list, explanation_paragraph
 
     ctx = dash.callback_context
     trigger_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+
+    # --- Reset logic ---
+    if trigger_id == "reset-term-btn":
+        node_data = {
+            "start": {"parent": None, "distance": 0.0, "label": ""}
+        }
+        clicked_nodes.clear()
+        unclicked_nodes.clear()
+        clicked_nodes_list.clear()
+        explanation_paragraph = HOW_IT_WORKS_MD
+        info_box_children = [
+            html.H4("Welcome to ELIE!"),
+            dcc.Markdown(explanation_paragraph),
+        ]
+        return generate_figure(), "start", info_box_children, None, True, ""
 
     # --- Load logic ---
     if trigger_id == "upload-graph" and upload_contents is not None:
@@ -373,88 +399,52 @@ def handle_interaction(clickData, reset_clicks, submit_clicks, input_submit, upl
         node_data = data["node_data"]
         clicked_nodes = set(clicked_nodes_list := data["clicked_nodes_list"])
         unclicked_nodes = data["unclicked_nodes"]
-        explanation_paragraph = data.get("explanation", explanation_paragraph)
+        explanation_paragraph = data.get("explanation", HOW_IT_WORKS_MD)
         recompute_all_distances()
         info_box_children = [
-            html.H4("ℹ️ About Quaternions"),
-            html.P(explanation_paragraph),
-            html.Div(id="knowledge-box")
+            html.H4(f"About {node_data['start'].get('label', 'start')}"),
+            dcc.Markdown(explanation_paragraph),
         ]
-        return generate_figure(), "start", info_box_children, None
-
-    # --- Reset logic ---
-    if trigger_id == "reset-btn":
-        node_data = {
-            "start": {"parent": None, "distance": 0.0}
-        }
-        total = 5  # 1 root + 4 children
-        for i in range(4):
-            child = f"start_child_{i}"
-            raw_dist = round(random.uniform(0.5, 1.5), 2)
-            norm_dist = raw_dist / total * 6
-            norm_dist = max(0.1, min(1.0, round(norm_dist * 10) / 10))
-            raw_breadth = round(random.uniform(0.5, 1.5), 2)
-            norm_breadth = raw_breadth / total * 6
-            norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
-            node_data[child] = {
-                "parent": "start",
-                "distance": norm_dist,
-                "raw_distance": raw_dist,
-                "breadth": norm_breadth,
-                "raw_breadth": raw_breadth
-            }
-        recompute_all_distances()
-        clicked_nodes = set()
-        unclicked_nodes = [k for k in node_data.keys() if k != "start"]
-        clicked_nodes_list = []
-        info_box_children = [
-            html.H4("ℹ️ About Quaternions"),
-            html.P(explanation_paragraph),
-            html.Div(id="knowledge-box")
-        ]
-        return generate_figure(), "start", info_box_children, dash.no_update
+        return generate_figure(), "start", info_box_children, None, False, dash.no_update
 
     # --- Submit logic ---
-    if (trigger_id == "submit-btn" or trigger_id == "start-input") and user_input:
+    if trigger_id == "start-input" and user_input:
         term = user_input.strip()
+        # Call LLM to get starter terms
+        llm_response = call_modal_llm(build_starter_prompt(term))
+        parsed_terms = parse_terms(llm_response, num_terms=4)  # Should return a dict like your starter_terms
+
         node_data = {
             "start": {"parent": None, "distance": 0.0, "label": term}
         }
-        total = 5  # 1 root + 4 children
-        for i in range(4):
-            child = f"start_child_{i}"
-            raw_dist = round(random.uniform(0.5, 1.5), 2)
-            norm_dist = raw_dist / total * 6
-            norm_dist = max(0.1, min(1.0, round(norm_dist * 10) / 10))
-            raw_breadth = round(random.uniform(0.5, 1.5), 2)
-            norm_breadth = raw_breadth / total * 6
-            norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
-            node_data[child] = {
+        for child_term, props in parsed_terms.items():
+            node_data[child_term] = {
                 "parent": "start",
-                "distance": norm_dist,
-                "raw_distance": raw_dist,
-                "breadth": norm_breadth,
-                "raw_breadth": raw_breadth
+                "distance": props["distance"],
+                "raw_distance": props["distance"],
+                "breadth": props["breadth"],
+                "raw_breadth": props["breadth"]
             }
         recompute_all_distances()
-        clicked_nodes = set()
-        unclicked_nodes = [k for k in node_data.keys() if k != "start"]
-        clicked_nodes_list = []
+        clicked_nodes.clear()
+        unclicked_nodes[:] = [k for k in node_data.keys() if k != "start"]
+        clicked_nodes_list.clear()
+        # Dynamically generate explanation paragraph
+        explanation_paragraph = call_modal_llm(build_final_prompt(term, clicked_nodes_list, unclicked_nodes))
         info_box_children = [
-            html.H4("ℹ️ About Quaternions"),
-            html.P(explanation_paragraph),
-            html.Div(id="knowledge-box")
+            html.H4(f"About {term}"),
+            dcc.Markdown(explanation_paragraph),
         ]
-        return generate_figure(), "start", info_box_children, dash.no_update
+        return generate_figure(), "start", info_box_children, dash.no_update, False, dash.no_update
 
     # --- Click logic ---
     if clickData and "points" in clickData:
         point = clickData["points"][0]
         clicked = point.get("customdata")
         if not clicked:
-            return generate_figure(), last_clicked, dash.no_update, dash.no_update
+            return generate_figure(), last_clicked, dash.no_update, dash.no_update, False, dash.no_update
         if clicked == "start" and clicked in clicked_nodes:
-            return generate_figure(), clicked, dash.no_update, dash.no_update
+            return generate_figure(), clicked, dash.no_update, dash.no_update, False, dash.no_update
 
         if clicked not in clicked_nodes:
             clicked_nodes.add(clicked)
@@ -462,32 +452,39 @@ def handle_interaction(clickData, reset_clicks, submit_clicks, input_submit, upl
                 unclicked_nodes.remove(clicked)
             if clicked not in clicked_nodes_list:
                 clicked_nodes_list.append(clicked)
-            children = generate_children(clicked)
-            for c in children:
-                if c not in unclicked_nodes and c not in clicked_nodes_list:
-                    unclicked_nodes.append(c)
-        return generate_figure(), clicked, dash.no_update, dash.no_update
+
+            # Dynamically call LLM for further prerequisites
+            initial_term = node_data["start"].get("label", "start")
+            known_terms = clicked_nodes_list.copy()
+            unknown_terms = unclicked_nodes.copy()
+            further_prompt = build_further_prompt(initial_term, unknown_terms, known_terms)
+            llm_response = call_modal_llm(further_prompt)
+            parsed_terms = parse_terms(llm_response, num_terms=3)  # Should return a dict
+
+            # Add new children to the graph
+            for child_term, props in parsed_terms.items():
+                if child_term not in node_data:
+                    node_data[child_term] = {
+                        "parent": clicked,
+                        "distance": props["distance"],
+                        "raw_distance": props["distance"],
+                        "breadth": props["breadth"],
+                        "raw_breadth": props["breadth"]
+                    }
+                    if child_term not in unclicked_nodes and child_term not in clicked_nodes_list:
+                        unclicked_nodes.append(child_term)
+
+            recompute_all_distances()
+            # Update explanation paragraph dynamically
+            explanation_paragraph = call_modal_llm(build_final_prompt(initial_term, unclicked_nodes, clicked_nodes_list))
+            info_box_children = [
+                html.H4(f"About {initial_term}"),
+                dcc.Markdown(explanation_paragraph),
+            ]
+            return generate_figure(), clicked, info_box_children, dash.no_update, False, dash.no_update
 
     # --- Default ---
-    return generate_figure(), last_clicked, dash.no_update, dash.no_update
-
-@app.callback(
-    Output("knowledge-box", "children"),
-    [Input("graph", "figure")]
-)
-def update_knowledge_box(_):
-    known = clicked_nodes_list
-    unknown = unclicked_nodes
-    return [
-        html.Div([
-            html.H5("Known"),
-            html.Ul([html.Li(k) for k in known]) if known else html.P("None")
-        ], style={"marginBottom": "10px"}),
-        html.Div([
-            html.H5("Unknown"),
-            html.Ul([html.Li(u) for u in unknown]) if unknown else html.P("None")
-        ])
-    ]
+    return generate_figure(), last_clicked, dash.no_update, dash.no_update, True, dash.no_update
 
 @app.callback(
     Output("download-graph", "data"),
@@ -507,6 +504,24 @@ def save_graph(n_clicks):
             filename="elie_graph.json"
         )
     return dash.no_update
+
+# Overlay visibility callback
+@app.callback(
+    Output("centered-input-overlay", "style"),
+    Input("input-overlay-visible", "data"),
+)
+def toggle_overlay(visible):
+    if visible:
+        return {
+            "position": "fixed",
+            "left": "50%",
+            "top": "50%",
+            "transform": "translate(-60%, -30%)",
+            "zIndex": 10,
+            "pointerEvents": "auto"
+        }
+    else:
+        return {"display": "none"}
 
 if __name__ == "__main__":
     app.run(debug=True)

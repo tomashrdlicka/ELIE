@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from prompting import *
+from elie.prompting import *
 
 # READ modal LLM API endpoint and key from environment variables
 LLM_ENDPOINT = os.getenv("LLM_ENDPOINT")
@@ -36,6 +36,6 @@ def call_modal_llm(prompt):
 
 
 if __name__ == "__main__":
-    response = call_modal_llm(build_starter_prompt("quaternion"))
+    response = call_modal_llm(build_further_prompt("quaternion", ["3D", "4D"], ["vectors", "rotation matrices"]))
     print(f"Modal LLM response: {response}")
     print(parse_terms(response))
