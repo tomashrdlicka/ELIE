@@ -6,6 +6,8 @@ import random
 import json
 from dash import ctx
 import base64
+from elie.llm_calls import call_local_llm
+
 
 app = dash.Dash(__name__)
 server = app.server
@@ -374,6 +376,31 @@ def save_graph(n_clicks):
             filename="elie_graph.json"
         )
     return dash.no_update
+
+# Write a callaback that gets triggered by the submit buttom
+# Takes the value from the input box and generates an explanation using the 
+# local LLM, then dumps it into the info box.
+@app.callback(
+    Output("info-box", "children"),
+    Input("submit-btn", "n_clicks"),  # Ensure button ID matches layout
+    State("start-input", "value")     # Ensure input ID matches layout
+)
+def generate_explanation(n_clicks, user_input):
+    if not n_clicks and not user_input:
+        return dash.no_update
+
+    # Call the local LLM to generate an explanation
+    prompt = f"Explain the concept of {user_input} and keep it concise."
+    explanation = call_local_llm(prompt)
+    print(f"Generated explanation: {explanation}")
+
+    # Return the formatted info box content
+    return [
+        html.H4(f"ℹ️ Explanation for: {user_input}"),
+        html.P(explanation)
+    ]
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)
