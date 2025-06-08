@@ -47,7 +47,7 @@ Click on the link in the terminal, e.g. `http://127.0.0.1:8050/` to open the app
 ## About
 
 This is a hackathon project started at the [CompMotifs: Hack the Sciences](https://lu.ma/apsqlxlj?tk=jK3xrw) event in June 2025,
-by Tomas Hrdlicka (@tomashrdlicka), Eva Sevenster (@eva-se), and Niko Sirmpilatze (@niksirbi).
+by [Tomáš Hrdlička](https://github.com/tomashrdlicka), [Eva Sevenster](https://github.com/eva-se), and [Niko Sirmpilatze](https://github.com/niksirbi).
 
 > [!warning]
 > This is a proof-of-concept project. Feel free to play around with it, but
