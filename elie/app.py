@@ -162,188 +162,55 @@ def generate_figure():
         mode="markers+text",
         text=labels,
         textposition="top center",
-        marker=dict(
-            size=sizes,
-            color=colors,
-            opacity=1,
-            line=dict(width=2, color='white')
-        ),
-        customdata=list(positions.keys()),
-        hoverinfo="text",
-        selected=dict(marker=dict(opacity=1)),
-        unselected=dict(marker=dict(opacity=1))
+        marker=dict(size=18, color=colors),
+        customdata=labels,
+        hoverinfo="text"
     )
 
     layout = go.Layout(
+        title="🧠 Concept Tree Explorer (Iterative)",
         clickmode="event+select",
-        xaxis=dict(visible=False, range=x_range),
-        yaxis=dict(visible=False, range=y_range),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
         margin=dict(l=20, r=20, t=40, b=20),
-        height=700,
-        transition={'duration': 500, 'easing': 'cubic-in-out'},
-        showlegend=False,
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        shapes=[dict(
-            type='rect',
-            xref='paper', yref='paper',
-            x0=0, y0=0, x1=1, y1=1,
-            line=dict(color='black', width=2),
-            fillcolor='rgba(0,0,0,0)'
-        )]
+        height=700
     )
 
-    return go.Figure(data=[edge_trace, node_trace], layout=layout)
+    return go.Figure(data=[trace], layout=layout)
 
-# === Graph State ===
-# Initialize with 'start' and 4 children
-node_data = {
-    "start": {"parent": None, "distance": 0.0}
-}
-total = 5  # 1 root + 4 children
-for i in range(4):
-    child = f"start_child_{i}"
-    raw_dist = round(random.uniform(0.5, 1.5), 2)
-    norm_dist = raw_dist / total * 6
-    norm_dist = max(0.1, min(1.0, round(norm_dist * 10) / 10))
-    raw_breadth = round(random.uniform(0.5, 1.5), 2)
-    norm_breadth = raw_breadth / total * 6
-    norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
-    node_data[child] = {
-        "parent": "start",
-        "distance": norm_dist,
-        "raw_distance": raw_dist,
-        "breadth": norm_breadth,
-        "raw_breadth": raw_breadth
-    }
-clicked_nodes = set()
-unclicked_nodes = [k for k in node_data.keys() if k != "start"]
-clicked_nodes_list = []
-recompute_all_distances()
 
 # === Dash Layout ===
 app.layout = html.Div([
-    html.H2(
-        "ELIE (Explain Like I'm an Expert)",
-        style={
-            "textAlign": "center",
-            "width": "100%",
-            "marginBottom": "18px"
-        }
-    ),
+    html.H3("🧠 Semantic Tree Explorer"),
 
     html.Div([
-        html.Button(
-            "Reset Graph",
-            id="reset-btn",
-            n_clicks=0,
-            style={
-                "padding": "10px 22px",
-                "fontSize": "1.08em",
-                "borderRadius": "7px",
-                "backgroundColor": "#e0e7ef",
-                "border": "1px solid #b0b8c1",
-                "color": "#222",
-                "cursor": "pointer",
-                "transition": "background 0.2s, color 0.2s"
-            }
-        ),
-        dcc.Input(
-            id="start-input",
-            type="text",
-            placeholder="Enter root concept...",
-            debounce=True,
-            n_submit=0,
-            style={
-                "padding": "10px 22px",
-                "fontSize": "1.08em",
-                "borderRadius": "7px",
-                "backgroundColor": "#e0e7ef",
-                "border": "1px solid #b0b8c1",
-                "color": "#222",
-                "transition": "background 0.2s, color 0.2s"
-            }
-        ),
-        html.Button(
-            "Submit",
-            id="submit-btn",
-            n_clicks=0,
-            style={
-                "padding": "10px 22px",
-                "fontSize": "1.08em",
-                "borderRadius": "7px",
-                "backgroundColor": "#e0e7ef",
-                "border": "1px solid #b0b8c1",
-                "color": "#222",
-                "cursor": "pointer",
-                "transition": "background 0.2s, color 0.2s"
-            }
-        ),
+        html.Button("Reset Graph", id="reset-btn", n_clicks=0),
+        dcc.Input(id="start-input", type="text", placeholder="Enter root concept...", debounce=True),
+        html.Button("Submit", id="submit-btn", n_clicks=0),
     ], style={"display": "flex", "gap": "10px", "alignItems": "center", "marginBottom": "20px"}),
 
-    html.Div([
-        dcc.Graph(id="graph", figure=generate_figure(), style={"flex": "3 1 0%"}),
-        html.Div([
-            html.Div([
-                html.Button(
-                    "Save Graph",
-                    id="save-btn",
-                    n_clicks=0,
-                    style={
-                        "padding": "10px 22px",
-                        "fontSize": "1.08em",
-                        "borderRadius": "7px",
-                        "backgroundColor": "#e0e7ef",
-                        "border": "1px solid #b0b8c1",
-                        "color": "#222",
-                        "cursor": "pointer",
-                        "transition": "background 0.2s, color 0.2s"
-                    }
-                ),
-                dcc.Download(id="download-graph"),
-                dcc.Upload(
-                    id="upload-graph",
-                    children=html.Button(
-                        "Load Graph",
-                        style={
-                            "padding": "10px 22px",
-                            "fontSize": "1.08em",
-                            "borderRadius": "7px",
-                            "backgroundColor": "#e0e7ef",
-                            "border": "1px solid #b0b8c1",
-                            "color": "#222",
-                            "cursor": "pointer",
-                            "transition": "background 0.2s, color 0.2s",
-                            "marginLeft": "10px"
-                        }
-                    ),
-                    multiple=False
-                ),
-            ], style={"marginBottom": "16px", "display": "flex", "gap": "10px", "justifyContent": "center"}),
-            html.Div(
-                id="info-box",
-                children=[
-                    html.H4("ℹ️ About Quaternions"),
-                    html.P(explanation_paragraph),
-                    html.Div(id="knowledge-box")
-                ],
-                style={
-                    "border": "1px solid #ccc",
-                    "padding": "15px",
-                    "backgroundColor": "#f9f9f9",
-                    "borderRadius": "8px",
-                    "flex": "1 1 0%",
-                    "maxWidth": "350px",
-                    "minWidth": "220px",
-                    "marginTop": "0px",
-                    "marginLeft": "20px",
-                    "marginRight": "30px"
-                }
-            )
-        ], style={"display": "flex", "flexDirection": "column", "alignItems": "stretch", "flex": "1 1 0%"})
-    ], style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start"}),
-    
+    dcc.Graph(id="graph", figure=generate_figure()),
     dcc.Store(id="last-clicked", data="start"),
+
+    html.Div(
+        id="info-box",
+        children=[
+            html.H4("ℹ️ About Quaternions"),
+            html.P(
+                "Quaternions are a number system that extends complex numbers. "
+                "They are commonly used to represent rotations in 3D space, as they avoid gimbal lock "
+                "and provide smooth interpolation (slerp). A quaternion is composed of one real part and "
+                "three imaginary parts: q = w + xi + yj + zk."
+            )
+        ],
+        style={
+            "border": "1px solid #ccc",
+            "padding": "15px",
+            "marginTop": "20px",
+            "backgroundColor": "#f9f9f9",
+            "borderRadius": "8px"
+        }
+    )
 ])
 
 @app.callback(
