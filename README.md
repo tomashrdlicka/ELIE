@@ -34,11 +34,6 @@ Install the package:
 pip install -e .
 ```
 
-If you are a developer trying to contribute, include the "modal" extra:
-```bash
-pip install -e '.[modal]'
-```
-
 Launch the dash-plotly app:
 
 ```bash
