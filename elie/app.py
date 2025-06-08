@@ -377,11 +377,3 @@ def save_graph(n_clicks):
 
 if __name__ == "__main__":
     app.run(debug=True)
-
-
-
-
-
-
-
-
