@@ -2,6 +2,8 @@
 
 **Explain Like I'm an Expert**: a spin on "Explain Like I'm 5"—but for people who want expert-level nuance.
 
+Check it out at [elie-zii2.onrender.com](https://elie-zii2.onrender.com/) or [try it out locally](#to-run-locally).
+
 ## What It Does
 
 ELIE is an interactive [Dash Plotly app](https://dash.plotly.com/) that tailors explanations to your current knowledge.
@@ -15,7 +17,7 @@ Think of it as a "choose-your-own-expert" learning map.
 4. **Iterate to expertise.**
    Keep choosing known concepts; the map updates and the explanation sharpens until it's perfectly pitched to your expertise.
 
-## Quick Start
+## To Run Locally
 
 Clone the repository:
 ```bash
