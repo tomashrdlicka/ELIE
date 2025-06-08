@@ -9,4 +9,5 @@ dependencies = [
     "dash>=3.0.4",
     "numpy",
     "requests",
+    "gunicorn>=20.0.4",
 ]

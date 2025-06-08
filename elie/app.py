@@ -509,10 +509,15 @@ def save_graph(n_clicks):
         )
     return dash.no_update
 
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8050))
     app.run(debug=True, port=port)
-
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=port,
+    )
 
 
 
