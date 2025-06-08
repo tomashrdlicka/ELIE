@@ -6,6 +6,7 @@ import random
 import json
 from dash import ctx
 import base64
+import os
 
 app = dash.Dash(__name__)
 server = app.server
@@ -509,7 +510,8 @@ def save_graph(n_clicks):
     return dash.no_update
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.getenv("PORT", 8050))
+    app.run(debug=True, port=port)
 
 
 
