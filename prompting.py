@@ -21,4 +21,10 @@ def build_final_prompt(concept, included_concepts, excluded_concepts):
     
 def parse_terms(response):
     parts = [item.strip() for item in response.split(",")]
-    return {parts[i]: float(parts[i + 1]) for i in range(0, len(parts), 2)}
+    return {
+        parts[i]: {
+            "distance": float(parts[i + 1]),
+            "breadth": float(parts[i + 2])
+        }
+        for i in range(0, len(parts), 3)
+    }
