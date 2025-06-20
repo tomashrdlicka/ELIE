@@ -6,10 +6,36 @@ import random
 import json
 from dash import ctx
 import base64
-from elie.llm_calls import call_modal_llm, build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt
+from elie.gemini_calls import call_gemini_llm
+from elie.prompting import build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt
 
 app = dash.Dash(__name__)
 server = app.server
+
+# Inject CSS to remove body margin
+app.index_string = """
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            html, body { margin: 0; padding: 0; height: 100%; width: 100%; background-color: #1a1a1a; }
+            #_dash-root-content { height: 100%; }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+"""
 
 # === Graph State ===
 # Initialize with only the center node and no children
@@ -66,17 +92,28 @@ def generate_children(term, count=3):
 def recompute_all_distances():
     total = len(node_data)
     for node, data in node_data.items():
+        # --- Breadth calculation for all nodes ---
+        # Assign a default raw_breadth if one doesn't exist.
+        # The start node is given a larger default so it stands out.
+        if 'raw_breadth' not in data:
+            data['raw_breadth'] = 1.5 if data['parent'] is None else 1.0
+        
+        raw_breadth = data['raw_breadth']
+        
+        # The multiplier (e.g., 3) controls how quickly nodes shrink as the graph grows.
+        norm_breadth = raw_breadth / total * 3
+        
+        # Clamp the breadth between a minimum and maximum value.
+        data['breadth'] = max(0.4, min(1.0, round(norm_breadth * 10) / 10))
+
+        # --- Distance calculation for child nodes ---
         if data["parent"] is not None:
-            # Distance
             raw_dist = data.get("raw_distance", data["distance"])
-            norm_dist = raw_dist / total * 6
-            norm_dist = max(0.1, min(1.0, round(norm_dist * 10) / 10))
+            # The multiplier (e.g., 4) controls how quickly nodes shrink.
+            norm_dist = raw_dist / total * 4
+            # Clamp the distance.
+            norm_dist = max(0.3, min(1.0, round(norm_dist * 10) / 10))
             data["distance"] = norm_dist
-            # Breadth
-            raw_breadth = data.get("raw_breadth", data.get("breadth", 1.0))
-            norm_breadth = raw_breadth / total * 6
-            norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
-            data["breadth"] = norm_breadth
 
 def build_positions(base_spacing=4.0):
     positions = {}
@@ -102,7 +139,7 @@ def build_positions(base_spacing=4.0):
         N = len(children)
         for i, child in enumerate(children):
             child_angle = angle + spread * ((i - (N - 1) / 2) / max(N, 1))
-            dfs(child, depth + 1, child_angle, spread / 2)
+            dfs(child, depth + 1, child_angle, spread / max(N, 1))
 
     dfs("start")
     return positions
@@ -118,7 +155,7 @@ def rescale_positions(positions, target_radius=10.0):
     scale = target_radius / max_dist
     return {node: (x * scale, y * scale) for node, (x, y) in positions.items()}
 
-def generate_figure():
+def generate_figure(focus_node="start"):
     positions = build_positions()
     positions = rescale_positions(positions, target_radius=10.0)
     xs, ys, labels, colors = [], [], [], []
@@ -147,25 +184,35 @@ def generate_figure():
                     edge_colors.append('#888')
         elif node != "start":
             label += f" ({breadth})"
-        sizes.append(80 * breadth)
+        sizes.append(120 * breadth)
         labels.append(label)
         if node == "start":
             colors.append("black")
         elif node in clicked_nodes:
             colors.append("#02ab13")  # dark olive green
         else:
-            colors.append("#d3d3d3")  # light grey
+            colors.append("#666666")  # dark grey for unclicked
 
-    # Compute centroid
-    center_x = sum(xs) / len(xs)
-    center_y = sum(ys) / len(ys)
-    spread = max(
-        max(xs) - min(xs),
-        max(ys) - min(ys),
-    ) / 2 + 2
+    # Handle empty or single-node graph
+    if len(positions) < 2:
+        x_range = [-10, 10]
+        y_range = [-10, 10]
+    else:
+        # --- Dynamic centering and zoom ---
+        focus_pos = positions.get(focus_node, (0, 0))
 
-    x_range = [center_x - spread, center_x + spread]
-    y_range = [center_y - spread, center_y + spread]
+        all_xs = [pos[0] for pos in positions.values()]
+        all_ys = [pos[1] for pos in positions.values()]
+        min_x, max_x = min(all_xs), max(all_xs)
+        min_y, max_y = min(all_ys), max(all_ys)
+
+        spread_x = max(focus_pos[0] - min_x, max_x - focus_pos[0])
+        spread_y = max(focus_pos[1] - min_y, max_y - focus_pos[1])
+        
+        spread = max(spread_x, spread_y) * 1.2 
+
+        x_range = [focus_pos[0] - spread, focus_pos[0] + spread]
+        y_range = [focus_pos[1] - spread, focus_pos[1] + spread]
 
     # Draw edges with per-segment color
     edge_traces = []
@@ -176,7 +223,7 @@ def generate_figure():
             x=edge_xs[i:i+2],
             y=edge_ys[i:i+2],
             mode="lines",
-            line=dict(width=2, color=color),
+            line=dict(width=3, color=color),
             hoverinfo="none",
             showlegend=False
         ))
@@ -188,11 +235,15 @@ def generate_figure():
         mode="markers+text",
         text=labels,
         textposition="top center",
+        textfont=dict(
+            color='#c0c0c0',
+            size=12
+        ),
         marker=dict(
             size=sizes,
             color=colors,
             opacity=1,
-            line=dict(width=2, color='white')
+            line=dict(width=2, color='#444444')
         ),
         customdata=list(positions.keys()),
         hoverinfo="text",
@@ -208,15 +259,8 @@ def generate_figure():
         height=700,
         transition={'duration': 500, 'easing': 'cubic-in-out'},
         showlegend=False,
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        shapes=[dict(
-            type='rect',
-            xref='paper', yref='paper',
-            x0=0, y0=0, x1=1, y1=1,
-            line=dict(color='black', width=2),
-            fillcolor='rgba(0,0,0,0)'
-        )]
+        plot_bgcolor='#1a1a1a',
+        paper_bgcolor='#1a1a1a'
     )
 
     return go.Figure(data=edge_traces + [node_trace], layout=layout)
@@ -227,81 +271,105 @@ app.layout = html.Div([
         "ELIE (Explain Like I'm an Expert)",
         style={
             "textAlign": "left",
-            "width": "100%",
-            "marginLeft": "40px"
+            "color": "#c0c0c0",
+            "marginTop": 0,
+            "paddingTop": "20px",
+            "paddingBottom": "10px"
         }
     ),
     dcc.Store(id="input-overlay-visible", data=True),
+    html.Div(id="loading-output", style={"display": "none"}), # Dummy div for callbacks
     html.Div([
         # Graph and overlay input
         html.Div([
             dcc.Graph(id="graph", figure=generate_figure(), style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}),
             # Overlay input centered on graph
             html.Div(
-                dcc.Input(
-                    id="start-input",
-                    type="text",
-                    placeholder="Enter root concept...",
-                    debounce=True,
-                    n_submit=0,
-                    style={
-                        "padding": "12px 28px",
-                        "fontSize": "1.18em",
-                        "borderRadius": "9px",
-                        "backgroundColor": "#e0e7ef",
-                        "border": "1.5px solid #b0b8c1",
-                        "color": "#222",
-                        "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
-                        "outline": "none",
-                        "width": "340px",
-                        "textAlign": "center",
-                        "marginTop": "4.5em",
-                        "marginRight": "15.0em"
-                    }
-                ),
+                html.Div([
+                    dcc.Input(
+                        id="start-input",
+                        type="text",
+                        placeholder="Enter root concept...",
+                        debounce=True,
+                        n_submit=0,
+                        style={
+                            "padding": "12px 45px 12px 28px",
+                            "fontSize": "1.18em",
+                            "borderRadius": "9px",
+                            "backgroundColor": "#333333",
+                            "border": "1.5px solid #888888",
+                            "color": "#e0e0e0",
+                            "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
+                            "outline": "none",
+                            "width": "100%",
+                            "textAlign": "center",
+                            "boxSizing": "border-box"
+                        }
+                    ),
+                    html.Button(
+                        '↑',
+                        id='submit-btn',
+                        n_clicks=0,
+                        style={
+                            "position": "absolute",
+                            "right": "8px",
+                            "top": "50%",
+                            "transform": "translateY(-50%)",
+                            "width": "32px",
+                            "height": "32px",
+                            "borderRadius": "50%",
+                            "border": "none",
+                            "backgroundColor": "#555",
+                            "color": "#e0e0e0",
+                            "fontSize": "20px",
+                            "cursor": "pointer",
+                            "display": "flex",
+                            "alignItems": "center",
+                            "justifyContent": "center",
+                            "paddingBottom": "4px"
+                        }
+                    )
+                ], style={"position": "relative", "width": "340px"}),
                 id="centered-input-overlay",
                 style={
-                    "position": "fixed",
+                    "position": "absolute",
                     "left": "50%",
-                    "top": "50%",
-                    "transform": "translate(-70%, -50%)",
+                    "top": "55%",
+                    "transform": "translate(-50%, -50%)",
                     "zIndex": 10,
-                    "pointerEvents": "auto"
+                    "pointerEvents": "auto",
+                    "transition": "opacity 0.3s ease, transform 0.3s ease"
                 }
             ),
-        ], style={"flex": "3 1 0%", "position": "relative", "minHeight": "700px"}),
+        ], style={"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "border": "3px solid silver", "borderRadius": "15px", "overflow": "hidden"}),
         html.Div([
-            html.Button(
-                "Reset Term",
-                id="reset-term-btn",
-                n_clicks=0,
-                style={
-                    "padding": "10px 22px",
-                    "fontSize": "1.08em",
-                    "borderRadius": "7px",
-                    "backgroundColor": "#e0e7ef",
-                    "border": "1px solid #b0b8c1",
-                    "color": "#222",
-                    "cursor": "pointer",
-                    "transition": "background 0.2s, color 0.2s",
-                    "width": "auto%",
-                    "display": "block",
-                    "marginBottom": "10px"
-                    
-                }
-            ),
             html.Div([
                 html.Button(
-                    "Save Graph",
+                    "Reset",
+                    id="reset-term-btn",
+                    n_clicks=0,
+                    style={
+                        "padding": "8px 16px",
+                        "fontSize": "0.95em",
+                        "borderRadius": "5px",
+                        "backgroundColor": "#333333",
+                        "border": "1px solid #555555",
+                        "color": "#c0c0c0",
+                        "cursor": "pointer",
+                        "transition": "background 0.2s, color 0.2s"
+                    }
+                ),
+                html.Button(
+                    "Save",
                     id="save-btn",
                     n_clicks=0,
                     style={
-                        "padding": "10px 22px",
-                        "fontSize": "1.08em",
-                        "borderRadius": "7px",
-                        "backgroundColor": "#e0e7ef",
-                        "border": "1px solid #b0b8c1",
-                        "color": "#222",
+                        "padding": "8px 16px",
+                        "fontSize": "0.95em",
+                        "borderRadius": "5px",
+                        "backgroundColor": "#333333",
+                        "border": "1px solid #555555",
+                        "color": "#c0c0c0",
                         "cursor": "pointer",
                         "transition": "background 0.2s, color 0.2s"
                     }
@@ -310,17 +378,16 @@ app.layout = html.Div([
                 dcc.Upload(
                     id="upload-graph",
                     children=html.Button(
-                        "Load Graph",
+                        "Load",
                         style={
-                            "padding": "10px 22px",
-                            "fontSize": "1.08em",
-                            "borderRadius": "7px",
-                            "backgroundColor": "#e0e7ef",
-                            "border": "1px solid #b0b8c1",
-                            "color": "#222",
+                            "padding": "8px 16px",
+                            "fontSize": "0.95em",
+                            "borderRadius": "5px",
+                            "backgroundColor": "#333333",
+                            "border": "1px solid #555555",
+                            "color": "#c0c0c0",
                             "cursor": "pointer",
                             "transition": "background 0.2s, color 0.2s",
-                            "marginLeft": "10px"
                         }
                     ),
                     multiple=False
@@ -329,26 +396,25 @@ app.layout = html.Div([
             html.Div(
                 id="info-box",
                 children=[
-                    html.H4("Welcome to ELIE!"),
+                    html.H4("Welcome to ELIE!", style={"color": "#c0c0c0"}),
                     dcc.Markdown(explanation_paragraph),
                 ],
                 style={
-                    "border": "1px solid #ccc",
+                    "border": "1px solid #555555",
                     "padding": "15px",
-                    "backgroundColor": "#f9f9f9",
+                    "backgroundColor": "#2a2a2a",
+                    "color": "#c0c0c0",
                     "borderRadius": "8px",
                     "flex": "1 1 0%",
                     "maxWidth": "350px",
                     "minWidth": "220px",
                     "marginTop": "0px",
-                    "marginLeft": "20px",
-                    "marginRight": "30px"
                 }
             )
         ], style={"display": "flex", "flexDirection": "column", "alignItems": "stretch", "flex": "1 1 0%"})
-    ], style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start"}),
+    ], style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start", "flexGrow": 1, "gap": "40px"}),
     dcc.Store(id="last-clicked", data="start"),
-])
+], style={'backgroundColor': '#1a1a1a', 'minHeight': '100vh', "padding": "0 40px", "boxSizing": "border-box", "display": "flex", "flexDirection": "column"})
 
 @app.callback(
     [
@@ -363,14 +429,15 @@ app.layout = html.Div([
         Input("graph", "clickData"),
         Input("start-input", "n_submit"),
         Input("upload-graph", "contents"),
-        Input("reset-term-btn", "n_clicks")
+        Input("reset-term-btn", "n_clicks"),
+        Input("submit-btn", "n_clicks")
     ],
     [
         State("start-input", "value"),
         State("last-clicked", "data")
     ]
 )
-def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, user_input, last_clicked):
+def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, submit_clicks, user_input, last_clicked):
     global node_data, clicked_nodes, unclicked_nodes, clicked_nodes_list, explanation_paragraph
 
     ctx = dash.callback_context
@@ -386,10 +453,10 @@ def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, u
         clicked_nodes_list.clear()
         explanation_paragraph = HOW_IT_WORKS_MD
         info_box_children = [
-            html.H4("Welcome to ELIE!"),
+            html.H4("Welcome to ELIE!", style={"color": "#c0c0c0"}),
             dcc.Markdown(explanation_paragraph),
         ]
-        return generate_figure(), "start", info_box_children, None, True, ""
+        return generate_figure(focus_node="start"), "start", info_box_children, None, True, ""
 
     # --- Load logic ---
     if trigger_id == "upload-graph" and upload_contents is not None:
@@ -402,16 +469,16 @@ def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, u
         explanation_paragraph = data.get("explanation", HOW_IT_WORKS_MD)
         recompute_all_distances()
         info_box_children = [
-            html.H4(f"About {node_data['start'].get('label', 'start')}"),
+            html.H4(f"About {node_data['start'].get('label', 'start')}", style={"color": "#c0c0c0"}),
             dcc.Markdown(explanation_paragraph),
         ]
-        return generate_figure(), "start", info_box_children, None, False, dash.no_update
+        return generate_figure(focus_node="start"), "start", info_box_children, None, False, dash.no_update
 
     # --- Submit logic ---
-    if trigger_id == "start-input" and user_input:
+    if (trigger_id == "start-input" or trigger_id == "submit-btn") and user_input:
         term = user_input.strip()
         # Call LLM to get starter terms
-        llm_response = call_modal_llm(build_starter_prompt(term))
+        llm_response = call_gemini_llm(build_starter_prompt(term))
         parsed_terms = parse_terms(llm_response, num_terms=4)  # Should return a dict like your starter_terms
 
         node_data = {
@@ -430,21 +497,21 @@ def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, u
         unclicked_nodes[:] = [k for k in node_data.keys() if k != "start"]
         clicked_nodes_list.clear()
         # Dynamically generate explanation paragraph
-        explanation_paragraph = call_modal_llm(build_final_prompt(term, clicked_nodes_list, unclicked_nodes))
+        explanation_paragraph = call_gemini_llm(build_final_prompt(term, clicked_nodes_list, unclicked_nodes))
         info_box_children = [
-            html.H4(f"About {term}"),
+            html.H4(f"About {term}", style={"color": "#c0c0c0"}),
             dcc.Markdown(explanation_paragraph),
         ]
-        return generate_figure(), "start", info_box_children, dash.no_update, False, dash.no_update
+        return generate_figure(focus_node="start"), "start", info_box_children, dash.no_update, False, dash.no_update
 
     # --- Click logic ---
     if clickData and "points" in clickData:
         point = clickData["points"][0]
         clicked = point.get("customdata")
         if not clicked:
-            return generate_figure(), last_clicked, dash.no_update, dash.no_update, False, dash.no_update
+            return generate_figure(focus_node=last_clicked), last_clicked, dash.no_update, dash.no_update, False, dash.no_update
         if clicked == "start" and clicked in clicked_nodes:
-            return generate_figure(), clicked, dash.no_update, dash.no_update, False, dash.no_update
+            return generate_figure(focus_node=clicked), clicked, dash.no_update, dash.no_update, False, dash.no_update
 
         if clicked not in clicked_nodes:
             clicked_nodes.add(clicked)
@@ -458,7 +525,7 @@ def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, u
             known_terms = clicked_nodes_list.copy()
             unknown_terms = unclicked_nodes.copy()
             further_prompt = build_further_prompt(initial_term, unknown_terms, known_terms)
-            llm_response = call_modal_llm(further_prompt)
+            llm_response = call_gemini_llm(further_prompt)
             parsed_terms = parse_terms(llm_response, num_terms=3)  # Should return a dict
 
             # Add new children to the graph
@@ -476,15 +543,15 @@ def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, u
 
             recompute_all_distances()
             # Update explanation paragraph dynamically
-            explanation_paragraph = call_modal_llm(build_final_prompt(initial_term, unclicked_nodes, clicked_nodes_list))
+            explanation_paragraph = call_gemini_llm(build_final_prompt(initial_term, unclicked_nodes, clicked_nodes_list))
             info_box_children = [
-                html.H4(f"About {initial_term}"),
+                html.H4(f"About {initial_term}", style={"color": "#c0c0c0"}),
                 dcc.Markdown(explanation_paragraph),
             ]
-            return generate_figure(), clicked, info_box_children, dash.no_update, False, dash.no_update
+            return generate_figure(focus_node=clicked), clicked, info_box_children, dash.no_update, False, dash.no_update
 
     # --- Default ---
-    return generate_figure(), last_clicked, dash.no_update, dash.no_update, True, dash.no_update
+    return generate_figure(focus_node=last_clicked), last_clicked, dash.no_update, dash.no_update, True, dash.no_update
 
 @app.callback(
     Output("download-graph", "data"),
@@ -511,17 +578,52 @@ def save_graph(n_clicks):
     Input("input-overlay-visible", "data"),
 )
 def toggle_overlay(visible):
+    base_style = {
+        "position": "absolute",
+        "left": "50%",
+        "top": "55%",
+        "zIndex": 10,
+        "transition": "opacity 0.3s ease, transform 0.3s ease"
+    }
     if visible:
         return {
-            "position": "fixed",
-            "left": "50%",
-            "top": "50%",
-            "transform": "translate(-60%, -30%)",
-            "zIndex": 10,
+            **base_style,
+            "transform": "translate(-50%, -50%)",
+            "opacity": 1,
             "pointerEvents": "auto"
         }
     else:
-        return {"display": "none"}
+        return {
+            **base_style,
+            "transform": "translate(-50%, -65%)", # move up a bit on fade
+            "opacity": 0,
+            "pointerEvents": "none"
+        }
+
+app.clientside_callback(
+    """
+    function(trigger) {
+        if (!trigger) {
+            return window.dash_clientside.no_update;
+        }
+        const inputBox = document.getElementById('start-input');
+        const submitBtn = document.getElementById('submit-btn');
+
+        if (inputBox && submitBtn) {
+            inputBox.classList.add('flash-effect');
+            submitBtn.classList.add('flash-effect-btn');
+
+            setTimeout(() => {
+                inputBox.classList.remove('flash-effect');
+                submitBtn.classList.remove('flash-effect-btn');
+            }, 700);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("loading-output", "children"), # Dummy output
+    Input("input-overlay-visible", "data")
+)
 
 if __name__ == "__main__":
     app.run(debug=True)
