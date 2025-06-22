@@ -3,10 +3,17 @@ name = "elie"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "dash-bootstrap-components>=2.0.3",
     "dash>=3.0.4",
     "numpy",
     "requests",
+    "gunicorn>=20.0.4",
+]
+
+# Optional dependencies
+[project.optional-dependencies]
+modal = [
+    "modal>=0.1.0",
 ]

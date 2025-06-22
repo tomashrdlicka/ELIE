@@ -1,3 +1,4 @@
+import os
 import dash
 from dash import dcc, html, Input, Output, State
 import plotly.graph_objs as go
@@ -572,7 +573,7 @@ def save_graph(n_clicks):
         )
     return dash.no_update
 
-# Overlay visibility callback
+
 @app.callback(
     Output("centered-input-overlay", "style"),
     Input("input-overlay-visible", "data"),
@@ -625,13 +626,12 @@ app.clientside_callback(
     Input("input-overlay-visible", "data")
 )
 
+
 if __name__ == "__main__":
-    app.run(debug=True)
-
-
-
-
-
-
-
-
+    port = int(os.getenv("PORT", 8050))
+    app.run(debug=True, port=port)
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=port,
+    )
