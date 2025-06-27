@@ -1,6 +1,6 @@
 import os
 import dash
-from dash import dcc, html, Input, Output, State
+from dash import dcc, html, Input, Output, State, ALL
 import plotly.graph_objs as go
 import numpy as np
 import random
@@ -9,6 +9,7 @@ from dash import ctx
 import base64
 from elie.gemini_calls import call_gemini_llm
 from elie.prompting import build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt
+import time
 
 app = dash.Dash(__name__)
 server = app.server
@@ -38,15 +39,6 @@ app.index_string = """
 </html>
 """
 
-# === Graph State ===
-# Initialize with only the center node and no children
-node_data = {
-    "start": {"parent": None, "distance": 0.0, "label": ""}
-}
-clicked_nodes = set()
-unclicked_nodes = []
-clicked_nodes_list = []
-
 # Placeholder for the How It Works markdown (fill in from README)
 HOW_IT_WORKS_MD = """## How It Works
 
@@ -54,116 +46,157 @@ HOW_IT_WORKS_MD = """## How It Works
 
 2. **Get a baseline:** ELIE shows you an initial explanation and a web of related concepts (e.g. "complex numbers", "rotation", "linear algebra").
 
-3. **Click what you know:** Select any familiar node—e.g. "linear algebra"—and ELIE refines the explanation.
+3. **Click what you do not know:** Select any unfamiliar node—e.g. "linear algebra"—and ELIE refines the explanation.
 
-4. **Iterate to expertise:** Keep choosing known concepts; the map updates and the explanation sharpens until it's perfectly pitched to your expertise.
+4. **Iterate to expertise:** Keep choosing unknown concepts; the map updates and the explanation sharpens until it's perfectly pitched to your expertise.
 """
 
+def get_initial_state():
+    """Returns the default state for the application."""
+    return {
+        "node_data": {"start": {"parent": None, "distance": 0.0, "label": ""}},
+        "clicked_nodes_list": [],
+        "unclicked_nodes": [],
+        "explanation_paragraph": HOW_IT_WORKS_MD,
+        "last_clicked": "start"
+    }
 
-explanation_paragraph = HOW_IT_WORKS_MD
-
-def generate_children(term, count=3):
-    """Generate 3 children and store in node_data with normalized distance."""
-    if term not in node_data:
-        return []
-
-    existing_children = [k for k, v in node_data.items() if v["parent"] == term]
-    if existing_children:
-        return existing_children  # Already added
-
-    total = len(node_data) + count
-    for i in range(count):
-        child = f"{term}_child_{i}"
-        raw_dist = round(random.uniform(0.5, 1.5), 2)
-        norm_dist = raw_dist / total * 6
-        norm_dist = max(0.1, min(1.0, round(norm_dist * 10) / 10))
-        raw_breadth = round(random.uniform(0.5, 1.5), 2)
-        norm_breadth = raw_breadth / total * 6
-        norm_breadth = max(0.1, min(1.0, round(norm_breadth * 10) / 10))
-        node_data[child] = {
-            "parent": term,
-            "distance": norm_dist,
-            "raw_distance": raw_dist,
-            "breadth": norm_breadth,
-            "raw_breadth": raw_breadth
-        }
-    recompute_all_distances()
-    return [f"{term}_child_{i}" for i in range(count)]
-
-def recompute_all_distances():
-    total = len(node_data)
+def recompute_all_distances(node_data):
+    """Ensure all nodes have baseline distance and breadth values."""
     for node, data in node_data.items():
-        # --- Breadth calculation for all nodes ---
-        # Assign a default raw_breadth if one doesn't exist.
-        # The start node is given a larger default so it stands out.
+        # --- Breadth (node size) calculation ---
         if 'raw_breadth' not in data:
-            data['raw_breadth'] = 1.5 if data['parent'] is None else 1.0
-        
-        raw_breadth = data['raw_breadth']
-        
-        # The multiplier (e.g., 3) controls how quickly nodes shrink as the graph grows.
-        norm_breadth = raw_breadth / total * 3
-        
-        # Clamp the breadth between a minimum and maximum value.
-        data['breadth'] = max(0.4, min(1.0, round(norm_breadth * 10) / 10))
+            # The start node is smaller than other nodes.
+            data['raw_breadth'] = 0.8 if data['parent'] is None else 1.2
+        data['breadth'] = data['raw_breadth']
 
-        # --- Distance calculation for child nodes ---
+        # --- Distance (edge length) calculation (only for non-root nodes) ---
         if data["parent"] is not None:
-            raw_dist = data.get("raw_distance", data["distance"])
-            # The multiplier (e.g., 4) controls how quickly nodes shrink.
-            norm_dist = raw_dist / total * 4
-            # Clamp the distance.
-            norm_dist = max(0.3, min(1.0, round(norm_dist * 10) / 10))
-            data["distance"] = norm_dist
+            if 'raw_distance' not in data:
+                data['raw_distance'] = 1.0
+            data['distance'] = data['raw_distance']
 
-def build_positions(base_spacing=4.0):
+def build_positions(node_data, base_spacing=5.0, focus_node="start"):
     positions = {}
+    focus_path = []
+    curr = focus_node
+    while curr and curr in node_data:
+        focus_path.append(curr)
+        curr = node_data[curr].get("parent")
+    focus_path.reverse()
 
     def dfs(node, depth=0, angle=0.0, spread=np.pi * 2):
-        if node in positions:
-            return
-
-        if node == "start":
-            x, y = 0, 0
+        if node in positions: return
+        if node == "start": x, y = 0, 0
         else:
             parent = node_data[node]["parent"]
             dist = node_data[node]["distance"]
             px, py = positions.get(parent, (0, 0))
             r = base_spacing * dist
-            x = px + r * np.cos(angle)
-            y = py + r * np.sin(angle)
-
+            x, y = px + r * np.cos(angle), py + r * np.sin(angle)
         positions[node] = (x, y)
-
-        # Explore children
+        
         children = [k for k, v in node_data.items() if v["parent"] == node]
-        N = len(children)
-        for i, child in enumerate(children):
-            child_angle = angle + spread * ((i - (N - 1) / 2) / max(N, 1))
-            dfs(child, depth + 1, child_angle, spread / max(N, 1))
+        if not children: return
 
+        next_focus_node = None
+        if node in focus_path:
+            idx = focus_path.index(node)
+            if idx + 1 < len(focus_path):
+                next_focus_node = focus_path[idx + 1]
+
+        weights = [3.0 if child == next_focus_node else 1.0 for child in children]
+        total_weight = sum(weights)
+        
+        cursor = angle - spread / 2.0
+        for i, child in enumerate(children):
+            child_spread = spread * (weights[i] / total_weight)
+            child_angle = cursor + child_spread / 2.0
+            dfs(child, depth + 1, child_angle, child_spread)
+            cursor += child_spread
     dfs("start")
     return positions
 
+def apply_force_directed_layout(positions, node_data, iterations=100, k_attract=0.02, k_repel=0.2, base_spacing=5.0):
+    """A force-directed layout simulation to optimize node placement."""
+    nodes = list(positions.keys())
+    
+    # Run simulation for a number of iterations
+    for _ in range(iterations):
+        displacements = {node: np.array([0.0, 0.0]) for node in nodes}
+        
+        # 1. Repulsive forces between all pairs of nodes
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                u, v = nodes[i], nodes[j]
+                pos_u, pos_v = np.array(positions[u]), np.array(positions[v])
+                delta = pos_u - pos_v
+                distance = np.linalg.norm(delta)
+                if distance < 0.1: distance = 0.1
+                
+                # Repulsive force (pushes nodes apart)
+                repulsive_force = k_repel / distance
+                displacements[u] += (delta / distance) * repulsive_force
+                displacements[v] -= (delta / distance) * repulsive_force
+                
+        # 2. Attractive forces along edges
+        for node, data in node_data.items():
+            if data['parent'] is not None and data['parent'] in positions:
+                parent = data['parent']
+                pos_node, pos_parent = np.array(positions[node]), np.array(positions[parent])
+                delta = pos_node - pos_parent
+                distance = np.linalg.norm(delta)
+                if distance < 0.1: distance = 0.1
+
+                # Ideal distance for the spring from the node's data
+                ideal_length = data['distance'] * base_spacing
+                
+                # Attractive force (pulls connected nodes together)
+                attractive_force = k_attract * (distance - ideal_length)
+                displacements[node] -= (delta / distance) * attractive_force
+                displacements[parent] += (delta / distance) * attractive_force
+                
+        # 3. Apply calculated displacements
+        for node in nodes:
+            if node != 'start': # Keep the root node fixed
+                disp = displacements[node]
+                # Dampen movement to prevent wild oscillations
+                movement = np.linalg.norm(disp)
+                if movement > 1.0:
+                    disp = disp / movement
+                positions[node] = (positions[node][0] + disp[0], positions[node][1] + disp[1])
+                
+    return positions
+
 def rescale_positions(positions, target_radius=10.0):
-    # Get all non-root positions
     non_root_positions = [(x, y) for node, (x, y) in positions.items() if (x, y) != (0, 0)]
-    if not non_root_positions:
-        return positions  # Only root node exists
+    if not non_root_positions: return positions
     max_dist = max(np.hypot(x, y) for x, y in non_root_positions)
-    if max_dist == 0:
-        return positions  # All nodes at root
+    if max_dist == 0: return positions
     scale = target_radius / max_dist
     return {node: (x * scale, y * scale) for node, (x, y) in positions.items()}
 
-def generate_figure(focus_node="start"):
-    positions = build_positions()
-    positions = rescale_positions(positions, target_radius=10.0)
+def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flash=None):
+    clicked_nodes = set(clicked_nodes_list)
+    positions = build_positions(node_data, focus_node=focus_node)
+    positions = apply_force_directed_layout(positions, node_data)
+    
+    # Conditionally rescale positions only if the graph is too large
+    target_radius = 10.0
+    non_root_positions = [(x, y) for node, (x, y) in positions.items() if (x, y) != (0, 0)]
+    
+    if non_root_positions:
+        current_max_radius = max(np.hypot(x, y) for x, y in non_root_positions)
+        if current_max_radius > target_radius:
+            scale_factor = target_radius / current_max_radius
+            positions = {node: (x * scale_factor, y * scale_factor) for node, (x, y) in positions.items()}
+
     xs, ys, labels, colors = [], [], [], []
     edge_xs, edge_ys = [], []
     edge_colors = []
     sizes = []
 
+    root_size = max(80, 120 - 2 * (len(positions) - 1))
     for node, (x, y) in positions.items():
         xs.append(x)
         ys.append(y)
@@ -178,460 +211,318 @@ def generate_figure(focus_node="start"):
                 px, py = positions[parent]
                 edge_xs += [px, x, None]
                 edge_ys += [py, y, None]
-                # Edge color: green if node is clicked, else gray
                 if node in clicked_nodes:
                     edge_colors.append('rgba(2,171,19,0.35)')
                 else:
                     edge_colors.append('#888')
         elif node != "start":
             label += f" ({breadth})"
-        sizes.append(120 * breadth)
+        # Root node size gently decreases as more nodes are added, but never below 80
+        if node == "start":
+            size = root_size
+        else:
+            size = 300 * breadth/3
+        # Flash effect: if node matches node_flash, make it larger and/or different color
+        if node_flash is not None and node == node_flash:
+            size = size * 1.25
+        sizes.append(size)
         labels.append(label)
         if node == "start":
-            colors.append("black")
+            color = "black"
         elif node in clicked_nodes:
-            colors.append("#02ab13")  # dark olive green
+            color = "#02ab13"
         else:
-            colors.append("#666666")  # dark grey for unclicked
+            color = "#666666"
+        if node_flash is not None and node == node_flash:
+            color = "#ffe066"  # subtle yellow highlight
+        colors.append(color)
 
-    # Handle empty or single-node graph
     if len(positions) < 2:
-        x_range = [-10, 10]
-        y_range = [-10, 10]
+        x_range, y_range = [-10, 10], [-10, 10]
     else:
-        # --- Dynamic centering and zoom ---
         focus_pos = positions.get(focus_node, (0, 0))
-
-        all_xs = [pos[0] for pos in positions.values()]
-        all_ys = [pos[1] for pos in positions.values()]
-        min_x, max_x = min(all_xs), max(all_xs)
-        min_y, max_y = min(all_ys), max(all_ys)
-
+        all_xs, all_ys = [p[0] for p in positions.values()], [p[1] for p in positions.values()]
+        min_x, max_x, min_y, max_y = min(all_xs), max(all_xs), min(all_ys), max(all_ys)
         spread_x = max(focus_pos[0] - min_x, max_x - focus_pos[0])
         spread_y = max(focus_pos[1] - min_y, max_y - focus_pos[1])
-        
-        spread = max(spread_x, spread_y) * 1.2 
+        spread = max(spread_x, spread_y) * 1.2 + 5
+        x_range, y_range = [focus_pos[0] - spread, focus_pos[0] + spread], [focus_pos[1] - spread, focus_pos[1] + spread]
 
-        x_range = [focus_pos[0] - spread, focus_pos[0] + spread]
-        y_range = [focus_pos[1] - spread, focus_pos[1] + spread]
-
-    # Draw edges with per-segment color
     edge_traces = []
-    edge_idx = 0
     for i in range(0, len(edge_xs), 3):
-        color = edge_colors[edge_idx] if edge_idx < len(edge_colors) else '#888'
-        edge_traces.append(go.Scatter(
-            x=edge_xs[i:i+2],
-            y=edge_ys[i:i+2],
-            mode="lines",
-            line=dict(width=3, color=color),
-            hoverinfo="none",
-            showlegend=False
-        ))
-        edge_idx += 1
+        color = edge_colors[i//3] if i//3 < len(edge_colors) else '#888'
+        edge_traces.append(go.Scatter(x=edge_xs[i:i+2], y=edge_ys[i:i+2], mode="lines", line=dict(width=3, color=color), hoverinfo="none", showlegend=False))
 
-    node_trace = go.Scatter(
-        x=xs,
-        y=ys,
-        mode="markers+text",
-        text=labels,
-        textposition="top center",
-        textfont=dict(
-            color='#c0c0c0',
-            size=12
-        ),
-        marker=dict(
-            size=sizes,
-            color=colors,
-            opacity=1,
-            line=dict(width=2, color='#444444')
-        ),
-        customdata=list(positions.keys()),
-        hoverinfo="text",
-        selected=dict(marker=dict(opacity=1)),
-        unselected=dict(marker=dict(opacity=1))
-    )
+    node_trace = go.Scatter(x=xs, y=ys, mode="markers+text", text=labels, textposition="top center", textfont=dict(color='#c0c0c0', size=12),
+        marker=dict(size=sizes, color=colors, opacity=1, line=dict(width=2, color='#444444')),
+        customdata=list(positions.keys()), hoverinfo="text", selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1)))
 
-    layout = go.Layout(
-        clickmode="event+select",
-        xaxis=dict(visible=False, range=x_range),
-        yaxis=dict(visible=False, range=y_range),
-        margin=dict(l=20, r=20, t=40, b=20),
-        height=700,
-        transition={'duration': 500, 'easing': 'cubic-in-out'},
-        showlegend=False,
-        plot_bgcolor='#1a1a1a',
-        paper_bgcolor='#1a1a1a'
-    )
+    layout = go.Layout(clickmode="event+select", xaxis=dict(visible=False, range=x_range), yaxis=dict(visible=False, range=y_range),
+        margin=dict(l=20, r=20, t=40, b=20), height=700, transition={'duration': 500, 'easing': 'cubic-in-out'},
+        showlegend=False, plot_bgcolor='#1a1a1a', paper_bgcolor='#1a1a1a')
 
     return go.Figure(data=edge_traces + [node_trace], layout=layout)
 
 # === Dash Layout ===
+initial_state = get_initial_state()
 app.layout = html.Div([
-    html.H2(
-        "ELIE (Explain Like I'm an Expert)",
-        style={
-            "textAlign": "left",
-            "color": "#c0c0c0",
-            "marginTop": 0,
-            "paddingTop": "20px",
-            "paddingBottom": "10px"
-        }
-    ),
-    dcc.Store(id="input-overlay-visible", data=True),
-    html.Div(id="loading-output", style={"display": "none"}), # Dummy div for callbacks
+    html.H2("ELIE (Explain Like I'm an Expert)", style={"textAlign": "left", "color": "#c0c0c0", "marginTop": 0, "paddingTop": "20px", "paddingBottom": "10px"}),
+    dcc.Store(id='app-state-store', data=initial_state),
+    dcc.Store(id='input-overlay-visible'),
+    dcc.Store(id='graph-key', data=0),
+    dcc.Store(id='input-flash', data=False),
+    dcc.Store(id='node-flash', data=None),
+    html.Div(id="loading-output", style={"display": "none"}),
     html.Div([
-        # Graph and overlay input
         html.Div([
-            dcc.Graph(id="graph", figure=generate_figure(), style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}),
-            # Overlay input centered on graph
             html.Div(
-                html.Div([
-                    dcc.Input(
-                        id="start-input",
-                        type="text",
-                        placeholder="Enter root concept...",
-                        debounce=True,
-                        n_submit=0,
-                        style={
-                            "padding": "12px 45px 12px 28px",
-                            "fontSize": "1.18em",
-                            "borderRadius": "9px",
-                            "backgroundColor": "#333333",
-                            "border": "1.5px solid #888888",
-                            "color": "#e0e0e0",
-                            "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
-                            "outline": "none",
-                            "width": "100%",
-                            "textAlign": "center",
-                            "boxSizing": "border-box"
-                        }
-                    ),
-                    html.Button(
-                        '↑',
-                        id='submit-btn',
-                        n_clicks=0,
-                        style={
-                            "position": "absolute",
-                            "right": "8px",
-                            "top": "50%",
-                            "transform": "translateY(-50%)",
-                            "width": "32px",
-                            "height": "32px",
-                            "borderRadius": "50%",
-                            "border": "none",
-                            "backgroundColor": "#555",
-                            "color": "#e0e0e0",
-                            "fontSize": "20px",
-                            "cursor": "pointer",
-                            "display": "flex",
-                            "alignItems": "center",
-                            "justifyContent": "center",
-                            "paddingBottom": "4px"
-                        }
+                id="graph-container",
+                children=[
+                    dcc.Graph(
+                        id={"type": "graph", "key": 0},
+                        figure=generate_figure(initial_state['node_data'], initial_state['clicked_nodes_list'], initial_state['last_clicked'], node_flash=None),
+                        relayoutData=None,
+                        style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}
                     )
+                ]
+            ),
+            html.Div(html.Div([
+                    dcc.Input(id="start-input", type="text", placeholder="Enter root concept...", debounce=True, n_submit=0, style={
+                        "padding": "12px 45px 12px 28px", "fontSize": "1.18em", "borderRadius": "9px", "backgroundColor": "#333333",
+                        "border": "1.5px solid #888888", "color": "#e0e0e0", "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
+                        "outline": "none", "width": "100%", "textAlign": "center", "boxSizing": "border-box"}),
+                    html.Button('↑', id='submit-btn', n_clicks=0, style={
+                        "position": "absolute", "right": "8px", "top": "50%", "transform": "translateY(-50%)", "width": "32px", "height": "32px",
+                        "borderRadius": "50%", "border": "none", "backgroundColor": "#555", "color": "#e0e0e0", "fontSize": "20px",
+                        "cursor": "pointer", "display": "flex", "alignItems": "center", "justifyContent": "center", "paddingBottom": "4px"})
                 ], style={"position": "relative", "width": "340px"}),
                 id="centered-input-overlay",
-                style={
-                    "position": "absolute",
-                    "left": "50%",
-                    "top": "55%",
-                    "transform": "translate(-50%, -50%)",
-                    "zIndex": 10,
-                    "pointerEvents": "auto",
-                    "transition": "opacity 0.3s ease, transform 0.3s ease"
-                }
+                style={"position": "absolute", "left": "50%", "top": "55%", "transform": "translate(-50%, -50%)", "zIndex": 10, "pointerEvents": "auto", "transition": "opacity 0.3s ease, transform 0.3s ease"}
             ),
         ], style={"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "border": "3px solid silver", "borderRadius": "15px", "overflow": "hidden"}),
         html.Div([
             html.Div([
-                html.Button(
-                    "Reset",
-                    id="reset-term-btn",
-                    n_clicks=0,
-                    style={
-                        "padding": "8px 16px",
-                        "fontSize": "0.95em",
-                        "borderRadius": "5px",
-                        "backgroundColor": "#333333",
-                        "border": "1px solid #555555",
-                        "color": "#c0c0c0",
-                        "cursor": "pointer",
-                        "transition": "background 0.2s, color 0.2s"
-                    }
-                ),
-                html.Button(
-                    "Save",
-                    id="save-btn",
-                    n_clicks=0,
-                    style={
-                        "padding": "8px 16px",
-                        "fontSize": "0.95em",
-                        "borderRadius": "5px",
-                        "backgroundColor": "#333333",
-                        "border": "1px solid #555555",
-                        "color": "#c0c0c0",
-                        "cursor": "pointer",
-                        "transition": "background 0.2s, color 0.2s"
-                    }
-                ),
+                html.Button("Reset", id="reset-term-btn", n_clicks=0, style={"padding": "8px 16px", "fontSize": "0.95em", "borderRadius": "5px", "backgroundColor": "#333333", "border": "1px solid #555555", "color": "#c0c0c0", "cursor": "pointer", "transition": "background 0.2s, color 0.2s"}),
+                html.Button("Save", id="save-btn", n_clicks=0, style={"padding": "8px 16px", "fontSize": "0.95em", "borderRadius": "5px", "backgroundColor": "#333333", "border": "1px solid #555555", "color": "#c0c0c0", "cursor": "pointer", "transition": "background 0.2s, color 0.2s"}),
                 dcc.Download(id="download-graph"),
-                dcc.Upload(
-                    id="upload-graph",
-                    children=html.Button(
-                        "Load",
-                        style={
-                            "padding": "8px 16px",
-                            "fontSize": "0.95em",
-                            "borderRadius": "5px",
-                            "backgroundColor": "#333333",
-                            "border": "1px solid #555555",
-                            "color": "#c0c0c0",
-                            "cursor": "pointer",
-                            "transition": "background 0.2s, color 0.2s",
-                        }
-                    ),
-                    multiple=False
-                ),
+                dcc.Upload(id="upload-graph", children=html.Button("Load", style={"padding": "8px 16px", "fontSize": "0.95em", "borderRadius": "5px", "backgroundColor": "#333333", "border": "1px solid #555555", "color": "#c0c0c0", "cursor": "pointer", "transition": "background 0.2s, color 0.2s"}), multiple=False),
             ], style={"marginBottom": "16px", "display": "flex", "gap": "10px", "justifyContent": "center"}),
-            html.Div(
-                id="info-box",
-                children=[
-                    html.H4("Welcome to ELIE!", style={"color": "#c0c0c0"}),
-                    dcc.Markdown(explanation_paragraph),
-                ],
-                style={
-                    "border": "1px solid #555555",
-                    "padding": "15px",
-                    "backgroundColor": "#2a2a2a",
-                    "color": "#c0c0c0",
-                    "borderRadius": "8px",
-                    "flex": "1 1 0%",
-                    "maxWidth": "350px",
-                    "minWidth": "220px",
-                    "marginTop": "0px",
-                }
-            )
+            html.Div(id="info-box", children=[html.H4("Welcome to ELIE!", style={"color": "#c0c0c0"}), dcc.Markdown(initial_state['explanation_paragraph'])], style={"border": "1px solid #555555", "padding": "15px", "backgroundColor": "#2a2a2a", "color": "#c0c0c0", "borderRadius": "8px", "flex": "1 1 0%", "maxWidth": "350px", "minWidth": "220px", "marginTop": "0px"})
         ], style={"display": "flex", "flexDirection": "column", "alignItems": "stretch", "flex": "1 1 0%"})
     ], style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start", "flexGrow": 1, "gap": "40px"}),
-    dcc.Store(id="last-clicked", data="start"),
 ], style={'backgroundColor': '#1a1a1a', 'minHeight': '100vh', "padding": "0 40px", "boxSizing": "border-box", "display": "flex", "flexDirection": "column"})
 
 @app.callback(
-    [
-        Output("graph", "figure"),
-        Output("last-clicked", "data"),
-        Output("info-box", "children"),
-        Output("upload-graph", "contents"),
-        Output("input-overlay-visible", "data"),
-        Output("start-input", "value"),
-    ],
-    [
-        Input("graph", "clickData"),
-        Input("start-input", "n_submit"),
-        Input("upload-graph", "contents"),
-        Input("reset-term-btn", "n_clicks"),
-        Input("submit-btn", "n_clicks")
-    ],
-    [
-        State("start-input", "value"),
-        State("last-clicked", "data")
-    ]
+    [Output("graph-container", "children"), Output("info-box", "children"), Output("upload-graph", "contents"),
+     Output("input-overlay-visible", "data"), Output("start-input", "value"), Output("app-state-store", "data"),
+     Output("graph-key", "data"), Output("input-flash", "data"), Output("node-flash", "data")],
+    [Input({'type': 'graph', 'key': ALL}, 'clickData'), Input("start-input", "n_submit"), Input("upload-graph", "contents"),
+     Input("reset-term-btn", "n_clicks"), Input("submit-btn", "n_clicks")],
+    [State("start-input", "value"), State("app-state-store", "data"), State("graph-key", "data")]
 )
-def handle_interaction(clickData, input_submit, upload_contents, reset_clicks, submit_clicks, user_input, last_clicked):
-    global node_data, clicked_nodes, unclicked_nodes, clicked_nodes_list, explanation_paragraph
-
+def handle_interaction(clickData_list, input_submit, upload_contents, reset_clicks, submit_clicks, user_input, state, graph_key):
     ctx = dash.callback_context
     trigger_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
 
-    # --- Reset logic ---
+    # Extract the first non-None clickData from the list
+    clickData = next((cd for cd in clickData_list if cd), None)
+
+    def make_graph(fig, key):
+        print(f"Rendering graph with id=graph-{key}")
+        return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1})
+
+    def autoscale_figure(fig):
+        # Set autorange for xaxis and yaxis in the layout
+        fig.update_layout(xaxis={"autorange": True}, yaxis={"autorange": True})
+        return fig
+
     if trigger_id == "reset-term-btn":
-        node_data = {
-            "start": {"parent": None, "distance": 0.0, "label": ""}
-        }
-        clicked_nodes.clear()
-        unclicked_nodes.clear()
-        clicked_nodes_list.clear()
-        explanation_paragraph = HOW_IT_WORKS_MD
-        info_box_children = [
-            html.H4("Welcome to ELIE!", style={"color": "#c0c0c0"}),
-            dcc.Markdown(explanation_paragraph),
-        ]
-        return generate_figure(focus_node="start"), "start", info_box_children, None, True, ""
+        print("Reset button clicked, forcing graph re-render with new key.")
+        new_state = get_initial_state()
+        info = [html.H4("Welcome to ELIE!", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
+        fig = autoscale_figure(fig)
+        new_key = graph_key + 1
+        return make_graph(fig, new_key), info, None, True, "", new_state, new_key, False, None
 
-    # --- Load logic ---
     if trigger_id == "upload-graph" and upload_contents is not None:
-        content_type, content_string = upload_contents.split(',')
-        decoded = base64.b64decode(content_string)
-        data = json.loads(decoded.decode('utf-8'))
-        node_data = data["node_data"]
-        clicked_nodes = set(clicked_nodes_list := data["clicked_nodes_list"])
-        unclicked_nodes = data["unclicked_nodes"]
-        explanation_paragraph = data.get("explanation", HOW_IT_WORKS_MD)
-        recompute_all_distances()
-        info_box_children = [
-            html.H4(f"About {node_data['start'].get('label', 'start')}", style={"color": "#c0c0c0"}),
-            dcc.Markdown(explanation_paragraph),
-        ]
-        return generate_figure(focus_node="start"), "start", info_box_children, None, False, dash.no_update
-
-    # --- Submit logic ---
-    if (trigger_id == "start-input" or trigger_id == "submit-btn") and user_input:
-        term = user_input.strip()
-        # Call LLM to get starter terms
-        llm_response = call_gemini_llm(build_starter_prompt(term))
-        parsed_terms = parse_terms(llm_response, num_terms=4)  # Should return a dict like your starter_terms
-
-        node_data = {
-            "start": {"parent": None, "distance": 0.0, "label": term}
+        print("Graph loaded from file, forcing graph re-render with new key.")
+        _, content_string = upload_contents.split(',')
+        data = json.loads(base64.b64decode(content_string).decode('utf-8'))
+        new_state = {
+            "node_data": data.get("node_data", {}),
+            "clicked_nodes_list": data.get("clicked_nodes_list", []),
+            "unclicked_nodes": data.get("unclicked_nodes", []),
+            "explanation_paragraph": data.get("explanation", HOW_IT_WORKS_MD),
+            "last_clicked": "start"
         }
+        recompute_all_distances(new_state['node_data'])
+        term = new_state['node_data']['start'].get('label', 'start')
+        info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
+        fig = autoscale_figure(fig)
+        new_key = graph_key + 1
+        return make_graph(fig, new_key), info, None, False, dash.no_update, new_state, new_key, False, None
+
+    if (trigger_id == "start-input" or trigger_id == "submit-btn") and user_input:
+        print(f"Root concept submitted: {user_input}. Forcing graph re-render with new key.")
+        term = user_input.strip()
+        parsed_terms = None
+        while True: # Retry loop until successful
+            try:
+                llm_response = call_gemini_llm(build_starter_prompt(term))
+                parsed = parse_terms(llm_response, num_terms=4)
+                if parsed: # Check if parsing was successful
+                    parsed_terms = parsed
+                    break
+            except Exception as e:
+                print(f"LLM call/parsing failed. Retrying... Error: {e}")
+            time.sleep(1)
+        
+        if not parsed_terms:
+            print("Failed to parse terms from LLM. No graph update.")
+            return [dash.no_update] * 6 + [graph_key, False, None]
+
+        node_data = {"start": {"parent": None, "distance": 0.0, "label": term}}
         for child_term, props in parsed_terms.items():
-            node_data[child_term] = {
-                "parent": "start",
-                "distance": props["distance"],
-                "raw_distance": props["distance"],
-                "breadth": props["breadth"],
-                "raw_breadth": props["breadth"]
-            }
-        recompute_all_distances()
-        clicked_nodes.clear()
-        unclicked_nodes[:] = [k for k in node_data.keys() if k != "start"]
-        clicked_nodes_list.clear()
-        # Dynamically generate explanation paragraph
-        explanation_paragraph = call_gemini_llm(build_final_prompt(term, clicked_nodes_list, unclicked_nodes))
-        info_box_children = [
-            html.H4(f"About {term}", style={"color": "#c0c0c0"}),
-            dcc.Markdown(explanation_paragraph),
-        ]
-        return generate_figure(focus_node="start"), "start", info_box_children, dash.no_update, False, dash.no_update
+            node_data[child_term] = {"parent": "start", "distance": props["distance"], "raw_distance": props["distance"], "breadth": props["breadth"], "raw_breadth": props["breadth"]}
+        
+        recompute_all_distances(node_data)
+        new_state = {
+            "node_data": node_data,
+            "clicked_nodes_list": [],
+            "unclicked_nodes": [k for k in node_data.keys() if k != "start"],
+            "last_clicked": "start"
+        }
+        new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
+        
+        info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
+        fig = autoscale_figure(fig)
+        new_key = graph_key + 1
+        return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, False, None
 
-    # --- Click logic ---
     if clickData and "points" in clickData:
-        point = clickData["points"][0]
-        clicked = point.get("customdata")
-        if not clicked:
-            return generate_figure(focus_node=last_clicked), last_clicked, dash.no_update, dash.no_update, False, dash.no_update
-        if clicked == "start" and clicked in clicked_nodes:
-            return generate_figure(focus_node=clicked), clicked, dash.no_update, dash.no_update, False, dash.no_update
+        clicked = clickData["points"][0].get("customdata")
+        if not clicked or (clicked == "start" and clicked in state['clicked_nodes_list']):
+            print("Graph click ignored (clicked start or already clicked). No graph update.")
+            return [dash.no_update] * 6 + [graph_key, False, None]
+        
+        new_state = state.copy()
+        if clicked not in new_state['clicked_nodes_list']:
+            print(f"Node '{clicked}' clicked, forcing graph re-render with new key.")
+            new_state['clicked_nodes_list'].append(clicked)
+            if clicked in new_state['unclicked_nodes']:
+                new_state['unclicked_nodes'].remove(clicked)
 
-        if clicked not in clicked_nodes:
-            clicked_nodes.add(clicked)
-            if clicked in unclicked_nodes:
-                unclicked_nodes.remove(clicked)
-            if clicked not in clicked_nodes_list:
-                clicked_nodes_list.append(clicked)
+            initial_term = new_state['node_data']["start"].get("label", "start")
+            
+            parsed_terms = None
+            while True: # Retry loop until successful
+                try:
+                    further_prompt = build_further_prompt(initial_term, new_state['unclicked_nodes'], new_state['clicked_nodes_list'])
+                    llm_response = call_gemini_llm(further_prompt)
+                    parsed = parse_terms(llm_response, num_terms=3)
+                    if parsed: # Check if parsing was successful
+                        parsed_terms = parsed
+                        break
+                except Exception as e:
+                    print(f"LLM call/parsing failed. Retrying... Error: {e}")
+                time.sleep(1)
 
-            # Dynamically call LLM for further prerequisites
-            initial_term = node_data["start"].get("label", "start")
-            known_terms = clicked_nodes_list.copy()
-            unknown_terms = unclicked_nodes.copy()
-            further_prompt = build_further_prompt(initial_term, unknown_terms, known_terms)
-            llm_response = call_gemini_llm(further_prompt)
-            parsed_terms = parse_terms(llm_response, num_terms=3)  # Should return a dict
+            if not parsed_terms:
+                print("Failed to parse further terms from LLM. No graph update.")
+                return [dash.no_update] * 6 + [graph_key, False, None]
 
-            # Add new children to the graph
             for child_term, props in parsed_terms.items():
-                if child_term not in node_data:
-                    node_data[child_term] = {
-                        "parent": clicked,
-                        "distance": props["distance"],
-                        "raw_distance": props["distance"],
-                        "breadth": props["breadth"],
-                        "raw_breadth": props["breadth"]
-                    }
-                    if child_term not in unclicked_nodes and child_term not in clicked_nodes_list:
-                        unclicked_nodes.append(child_term)
+                if child_term not in new_state['node_data']:
+                    new_state['node_data'][child_term] = {"parent": clicked, "distance": props["distance"], "raw_distance": props["distance"], "breadth": props["breadth"], "raw_breadth": props["breadth"]}
+                    if child_term not in new_state['unclicked_nodes'] and child_term not in new_state['clicked_nodes_list']:
+                        new_state['unclicked_nodes'].append(child_term)
 
-            recompute_all_distances()
-            # Update explanation paragraph dynamically
-            explanation_paragraph = call_gemini_llm(build_final_prompt(initial_term, unclicked_nodes, clicked_nodes_list))
-            info_box_children = [
-                html.H4(f"About {initial_term}", style={"color": "#c0c0c0"}),
-                dcc.Markdown(explanation_paragraph),
-            ]
-            return generate_figure(focus_node=clicked), clicked, info_box_children, dash.no_update, False, dash.no_update
+            recompute_all_distances(new_state['node_data'])
+            new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(initial_term, new_state['unclicked_nodes'], new_state['clicked_nodes_list']))
+        else:
+            print(f"Node '{clicked}' already clicked. No graph update.")
+        new_state['last_clicked'] = clicked
+        term = new_state['node_data']['start'].get('label', 'start')
+        info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=clicked)
+        fig = autoscale_figure(fig)
+        new_key = graph_key + 1
+        return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, False, clicked
 
-    # --- Default ---
-    return generate_figure(focus_node=last_clicked), last_clicked, dash.no_update, dash.no_update, True, dash.no_update
+    print("No update triggered. No graph update.")
+    return [dash.no_update] * 6 + [graph_key, False, None]
 
 @app.callback(
     Output("download-graph", "data"),
     Input("save-btn", "n_clicks"),
+    State("app-state-store", "data"),
     prevent_initial_call=True
 )
-def save_graph(n_clicks):
+def save_graph(n_clicks, state):
     if n_clicks:
         export_data = {
-            "node_data": node_data,
-            "clicked_nodes_list": clicked_nodes_list,
-            "unclicked_nodes": unclicked_nodes,
-            "explanation": explanation_paragraph  # define this variable
+            "node_data": state['node_data'],
+            "clicked_nodes_list": state['clicked_nodes_list'],
+            "unclicked_nodes": state['unclicked_nodes'],
+            "explanation": state['explanation_paragraph']
         }
-        return dict(
-            content=json.dumps(export_data, indent=2),
-            filename="elie_graph.json"
-        )
+        return dict(content=json.dumps(export_data, indent=2), filename="elie_graph.json")
     return dash.no_update
-
 
 @app.callback(
     Output("centered-input-overlay", "style"),
     Input("input-overlay-visible", "data"),
 )
 def toggle_overlay(visible):
-    base_style = {
-        "position": "absolute",
-        "left": "50%",
-        "top": "55%",
-        "zIndex": 10,
-        "transition": "opacity 0.3s ease, transform 0.3s ease"
-    }
+    base_style = {"position": "absolute", "left": "50%", "top": "55%", "zIndex": 10, "transition": "opacity 0.3s ease, transform 0.3s ease"}
     if visible:
-        return {
-            **base_style,
-            "transform": "translate(-50%, -50%)",
-            "opacity": 1,
-            "pointerEvents": "auto"
-        }
+        return {**base_style, "transform": "translate(-50%, -50%)", "opacity": 1, "pointerEvents": "auto"}
     else:
-        return {
-            **base_style,
-            "transform": "translate(-50%, -65%)", # move up a bit on fade
-            "opacity": 0,
-            "pointerEvents": "none"
-        }
+        return {**base_style, "transform": "translate(-50%, -65%)", "opacity": 0, "pointerEvents": "none"}
 
-app.clientside_callback(
-    """
-    function(trigger) {
-        if (!trigger) {
-            return window.dash_clientside.no_update;
-        }
-        const inputBox = document.getElementById('start-input');
-        const submitBtn = document.getElementById('submit-btn');
-
-        if (inputBox && submitBtn) {
-            inputBox.classList.add('flash-effect');
-            submitBtn.classList.add('flash-effect-btn');
-
-            setTimeout(() => {
-                inputBox.classList.remove('flash-effect');
-                submitBtn.classList.remove('flash-effect-btn');
-            }, 700);
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output("loading-output", "children"), # Dummy output
-    Input("input-overlay-visible", "data")
+# Flash reset callbacks
+@app.callback(
+    Output('input-flash', 'data', allow_duplicate=True),
+    Input('input-flash', 'data'),
+    prevent_initial_call=True
 )
+def reset_input_flash(flash):
+    if flash:
+        time.sleep(0.3)
+        return False
+    return dash.no_update
 
+@app.callback(
+    Output('node-flash', 'data', allow_duplicate=True),
+    Input('node-flash', 'data'),
+    prevent_initial_call=True
+)
+def reset_node_flash(node):
+    if node is not None:
+        time.sleep(0.3)
+        return None
+    return dash.no_update
+
+# Input style callback
+@app.callback(
+    Output('start-input', 'style'),
+    Input('input-flash', 'data'),
+)
+def style_input_box(flash):
+    base_style = {
+        "padding": "12px 45px 12px 28px", "fontSize": "1.18em", "borderRadius": "9px", "backgroundColor": "#333333",
+        "border": "1.5px solid #888888", "color": "#e0e0e0", "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
+        "outline": "none", "width": "100%", "textAlign": "center", "boxSizing": "border-box"
+    }
+    if flash:
+        base_style["border"] = "2.5px solid #02ab13"
+        base_style["boxShadow"] = "0 0 12px #02ab13"
+    return base_style
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8050))
     app.run(debug=True, port=port)
-    app.run(
-        debug=True,
-        host="0.0.0.0",
-        port=port,
-    )
+    app.run(debug=True, host="0.0.0.0", port=port)

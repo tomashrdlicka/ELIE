@@ -32,8 +32,8 @@ def call_gemini_llm(prompt: str) -> str:
     """
     try:
         model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        print(f"Sending message to Gemini model: {GEMINI_MODEL_NAME}")
-        print(f"Prompt: {prompt}")
+        #print(f"Sending message to Gemini model: {GEMINI_MODEL_NAME}")
+        #print(f"Prompt: {prompt}")
 
         # Use generate_content for single turn conversations
         response = model.generate_content(prompt)
@@ -49,8 +49,6 @@ def call_gemini_llm(prompt: str) -> str:
         else:
             return "❌ Error: No candidates found in Gemini response."
 
-    except types.core.APIError as e:
-        return f"❌ Error reaching Gemini LLM API: {e}"
     except Exception as e:
         return f"❌ An unexpected error occurred: {e}"
 

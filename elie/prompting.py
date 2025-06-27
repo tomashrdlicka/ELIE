@@ -35,6 +35,14 @@ def build_final_prompt(concept, included_concepts, excluded_concepts):
         f"repeat to me what I already know. If suitable, use analogies related to the concepts I do know to fill in the gaps "
         f"caused by the terms I do not know."
     )
+    
+def get_more_concepts(included_concepts, excluded_concepts):
+    return (
+        f"Given that I understand {', '.join(included_concepts)} and I do not understand {', '.join(excluded_concepts)}, "
+        f"please give me 4 new concepts that I could learn with my current knowledge. Please give me the concepts in the following format: concept1,concept2,concept3,concept4"
+        f"Please only answer in english."
+        f"This is an example of how the output should look: Linear Algebra,Vectors,4-D Coordinate System,Rotation Matrices"
+    )
 
 def parse_terms(response, num_terms=4):
     # First, try to match the verbose format with labels
