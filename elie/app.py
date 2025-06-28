@@ -221,7 +221,7 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         if node == "start":
             size = root_size
         else:
-            size = 50 + 50 * breadth
+            size = 50 + 30 * breadth
         # Flash effect: if node matches node_flash, make it larger and/or different color
         if node_flash is not None and node == node_flash:
             size = size * 1.25
@@ -230,11 +230,11 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         if node == "start":
             color = "black"
         elif node in clicked_nodes:
-            color = "#009900"
+            color = "#02ab13"
         else:
             color = "#666666"
         if node_flash is not None and node == node_flash:
-            color = "#02ab13"  
+            color = "#ffff66"  
         colors.append(color)
 
     if len(positions) < 2:
@@ -402,7 +402,7 @@ def handle_interaction(clickData_list, input_submit, upload_contents, reset_clic
         fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
         fig = autoscale_figure(fig)
         new_key = graph_key + 1
-        return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, True, None
+        return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, False, None
 
     if clickData and "points" in clickData:
         clicked = clickData["points"][0].get("customdata")
@@ -485,17 +485,17 @@ def toggle_overlay(visible):
     else:
         return {**base_style, "transform": "translate(-50%, -65%)", "opacity": 0, "pointerEvents": "none"}
 
-# Flash reset callbacks
+# --- IMMEDIATE INPUT FLASH CALLBACK ---
 @app.callback(
     Output('input-flash', 'data', allow_duplicate=True),
-    Input('input-flash', 'data'),
+    [Input('start-input', 'n_submit'), Input('submit-btn', 'n_clicks')],
     prevent_initial_call=True
 )
-def reset_input_flash(flash):
-    if flash:
-        time.sleep(0.3)
-        return False
-    return dash.no_update
+def trigger_input_flash(n_submit, n_clicks):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update
+    return True
 
 @app.callback(
     Output('node-flash', 'data', allow_duplicate=True),
