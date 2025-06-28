@@ -1,6 +1,6 @@
 import os
 import dash
-from dash import dcc, html, Input, Output, State, ALL
+from dash import dcc, html, Input, Output, State, ALL, MATCH
 import plotly.graph_objs as go
 import numpy as np
 import random
@@ -8,7 +8,7 @@ import json
 from dash import ctx
 import base64
 from elie.gemini_calls import call_gemini_llm
-from elie.prompting import build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt
+from elie.prompting import build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt, get_more_concepts
 import time
 
 app = dash.Dash(__name__)
@@ -221,7 +221,7 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         if node == "start":
             size = root_size
         else:
-            size = 300 * breadth/3
+            size = 50 + 50 * breadth
         # Flash effect: if node matches node_flash, make it larger and/or different color
         if node_flash is not None and node == node_flash:
             size = size * 1.25
@@ -230,7 +230,7 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         if node == "start":
             color = "black"
         elif node in clicked_nodes:
-            color = "#278226"
+            color = "#009900"
         else:
             color = "#666666"
         if node_flash is not None and node == node_flash:
@@ -286,6 +286,8 @@ app.layout = html.Div([
                     )
                 ]
             ),
+            # --- SUGGESTED CONCEPTS UI ---
+            html.Div(id="suggested-concepts-container", style={"marginTop": "24px", "textAlign": "center"}),
             html.Div(html.Div([
                     dcc.Input(id="start-input", type="text", placeholder="Enter root concept...", debounce=True, n_submit=0, style={
                         "padding": "12px 45px 12px 28px", "fontSize": "1.18em", "borderRadius": "9px", "backgroundColor": "#333333",
@@ -400,7 +402,7 @@ def handle_interaction(clickData_list, input_submit, upload_contents, reset_clic
         fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
         fig = autoscale_figure(fig)
         new_key = graph_key + 1
-        return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, False, None
+        return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, True, None
 
     if clickData and "points" in clickData:
         clicked = clickData["points"][0].get("customdata")
@@ -522,17 +524,112 @@ def style_input_box(flash):
         base_style["boxShadow"] = "0 0 16px 4px #02ab13"
     return base_style
 
+# @app.callback(
+#     Output('graph-container', 'style'),
+#     Input('node-flash', 'data'),
+# )
+# def style_graph_container(node_flash):
+#     base_style = {"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "borderRadius": "15px", "overflow": "hidden", "transition": "box-shadow 0.3s"}
+#     if node_flash is not None:
+#         base_style["boxShadow"] = "0 0 24px 6px #02ab13"
+#     else:
+#         base_style["boxShadow"] = "none"
+#     return base_style
+
+# --- SUGGESTED CONCEPTS CALLBACK ---
 @app.callback(
-    Output('graph-container', 'style'),
-    Input('node-flash', 'data'),
+    Output("suggested-concepts-container", "children"),
+    [Input("app-state-store", "data")],
 )
-def style_graph_container(node_flash):
-    base_style = {"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "borderRadius": "15px", "overflow": "hidden", "transition": "box-shadow 0.3s"}
-    if node_flash is not None:
-        base_style["boxShadow"] = "0 0 24px 6px #02ab13"
-    else:
-        base_style["boxShadow"] = "none"
-    return base_style
+def update_suggested_concepts(state):
+    # Only show suggestions if a root concept is loaded
+    node_data = state.get("node_data", {})
+    if not node_data or not node_data.get("start", {}).get("label"):
+        return ""
+    known = state.get("unclicked_nodes", [])
+    unknown = state.get("clicked_nodes_list", [])
+    # Debug print
+    print(f"[SUGGESTED TERMS] known: {known}, unknown: {unknown}")
+    # Call LLM for suggestions
+    prompt = get_more_concepts(known, unknown)
+    try:
+        llm_response = call_gemini_llm(prompt)
+        # Parse comma-separated concepts (no distances/breadths)
+        suggestions = [s.strip() for s in llm_response.split(",") if s.strip()][:4]
+    except Exception as e:
+        suggestions = []
+    if not suggestions:
+        return ""
+    # Render as clickable pill-shaped buttons
+    return html.Div([
+        html.Div("You could now explore:", style={"color": "#c0c0c0", "fontSize": "1.08em", "marginBottom": "10px"}),
+        html.Div([
+            html.Button(term, id={"type": "suggested-term", "term": term}, n_clicks=0, style={
+                "display": "inline-block", "background": "#232a3a", "color": "#02ab13", "borderRadius": "18px", "padding": "7px 18px", "margin": "0 7px 7px 0", "fontWeight": 600, "fontSize": "1.05em", "boxShadow": "0 2px 8px rgba(2,171,19,0.07)", "border": "1.5px solid #02ab13", "cursor": "pointer", "transition": "background 0.2s, color 0.2s" 
+            }) for term in suggestions]
+        , style={"display": "flex", "flexWrap": "wrap", "justifyContent": "center"})
+    ], style={"position": "relative", "paddingBottom": "10px"})
+
+# --- SUGGESTED TERM CLICK CALLBACK ---
+@app.callback(
+    [Output("graph-container", "children", allow_duplicate=True), Output("info-box", "children", allow_duplicate=True), Output("upload-graph", "contents", allow_duplicate=True),
+     Output("input-overlay-visible", "data", allow_duplicate=True), Output("start-input", "value", allow_duplicate=True), Output("app-state-store", "data", allow_duplicate=True),
+     Output("graph-key", "data", allow_duplicate=True), Output("input-flash", "data", allow_duplicate=True), Output("node-flash", "data", allow_duplicate=True)],
+    [Input({'type': 'suggested-term', 'term': ALL}, 'n_clicks')],
+    [State({'type': 'suggested-term', 'term': ALL}, 'id'), State("app-state-store", "data"), State("graph-key", "data")],
+    prevent_initial_call=True
+)
+def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key):
+    from dash import callback_context
+    ctx = callback_context
+    # Find which button was clicked (n_clicks just incremented)
+    if not ctx.triggered or not all_n_clicks or not all_btn_ids:
+        return [dash.no_update] * 6 + [graph_key, False, None]
+    # Find the index of the button that was just clicked
+    clicked_idx = None
+    for i, n in enumerate(all_n_clicks):
+        if n and n > 0:
+            clicked_idx = i
+    if clicked_idx is None:
+        return [dash.no_update] * 6 + [graph_key, False, None]
+    btn_id_dict = all_btn_ids[clicked_idx]
+    term = btn_id_dict['term']
+    print(f"[SUGGESTED TERM CLICKED] {term}")
+    parsed_terms = None
+    while True: # Retry loop until successful
+        try:
+            llm_response = call_gemini_llm(build_starter_prompt(term))
+            parsed = parse_terms(llm_response, num_terms=4)
+            if parsed:
+                parsed_terms = parsed
+                break
+        except Exception as e:
+            print(f"LLM call/parsing failed. Retrying... Error: {e}")
+        time.sleep(1)
+    if not parsed_terms:
+        print("Failed to parse terms from LLM. No graph update.")
+        return [dash.no_update] * 6 + [graph_key, False, None]
+    node_data = {"start": {"parent": None, "distance": 0.0, "label": term}}
+    for child_term, props in parsed_terms.items():
+        node_data[child_term] = {"parent": "start", "distance": props["distance"], "raw_distance": props["distance"], "breadth": props["breadth"], "raw_breadth": props["breadth"]}
+    recompute_all_distances(node_data)
+    new_state = {
+        "node_data": node_data,
+        "clicked_nodes_list": [],
+        "unclicked_nodes": [k for k in node_data.keys() if k != "start"],
+        "last_clicked": "start"
+    }
+    new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
+    fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
+    def make_graph(fig, key):
+        return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1})
+    def autoscale_figure(fig):
+        fig.update_layout(xaxis={"autorange": True}, yaxis={"autorange": True})
+        return fig
+    fig = autoscale_figure(fig)
+    new_key = graph_key + 1
+    info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+    return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, True, None
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8050))
