@@ -230,11 +230,11 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         if node == "start":
             color = "black"
         elif node in clicked_nodes:
-            color = "#02ab13"
+            color = "#278226"
         else:
             color = "#666666"
         if node_flash is not None and node == node_flash:
-            color = "#ffe066"  # subtle yellow highlight
+            color = "#02ab13"  
         colors.append(color)
 
     if len(positions) < 2:
@@ -299,7 +299,7 @@ app.layout = html.Div([
                 id="centered-input-overlay",
                 style={"position": "absolute", "left": "50%", "top": "55%", "transform": "translate(-50%, -50%)", "zIndex": 10, "pointerEvents": "auto", "transition": "opacity 0.3s ease, transform 0.3s ease"}
             ),
-        ], style={"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "border": "3px solid silver", "borderRadius": "15px", "overflow": "hidden"}),
+        ], style={"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "borderRadius": "15px", "overflow": "hidden"}),
         html.Div([
             html.Div([
                 html.Button("Reset", id="reset-term-btn", n_clicks=0, style={"padding": "8px 16px", "fontSize": "0.95em", "borderRadius": "5px", "backgroundColor": "#333333", "border": "1px solid #555555", "color": "#c0c0c0", "cursor": "pointer", "transition": "background 0.2s, color 0.2s"}),
@@ -519,7 +519,19 @@ def style_input_box(flash):
     }
     if flash:
         base_style["border"] = "2.5px solid #02ab13"
-        base_style["boxShadow"] = "0 0 12px #02ab13"
+        base_style["boxShadow"] = "0 0 16px 4px #02ab13"
+    return base_style
+
+@app.callback(
+    Output('graph-container', 'style'),
+    Input('node-flash', 'data'),
+)
+def style_graph_container(node_flash):
+    base_style = {"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "borderRadius": "15px", "overflow": "hidden", "transition": "box-shadow 0.3s"}
+    if node_flash is not None:
+        base_style["boxShadow"] = "0 0 24px 6px #02ab13"
+    else:
+        base_style["boxShadow"] = "none"
     return base_style
 
 if __name__ == "__main__":
