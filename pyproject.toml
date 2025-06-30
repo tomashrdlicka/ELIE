@@ -11,5 +11,6 @@ dependencies = [
     "requests",
     "gunicorn>=20.0.4",
     "google-generativeai",
+    "plotly"
 ]
 
