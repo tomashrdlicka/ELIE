@@ -40,6 +40,8 @@ def get_more_concepts(included_concepts, excluded_concepts):
     return (
         f"Given that I understand {', '.join(included_concepts)} and I do not understand {', '.join(excluded_concepts)}, "
         f"please give me 4 new concepts that I could learn with my current knowledge. Please give me the concepts in the following format: concept1,concept2,concept3,concept4"
+        f"Please make sure that the concepts are related to the concepts I already know. Please make sure that the concepts are not too similar to the concepts I already know."
+        f"Please make sure that your answer is only a comma-separated list of four concepts and nothing else."
         f"Please only answer in english."
         f"This is an example of how the output should look: Linear Algebra,Vectors,4-D Coordinate System,Rotation Matrices"
     )

@@ -95,7 +95,7 @@ def build_positions(node_data, base_spacing=5.0, focus_node="start"):
             r = base_spacing * dist
             x, y = px + r * np.cos(angle), py + r * np.sin(angle)
         positions[node] = (x, y)
-        
+
         children = [k for k, v in node_data.items() if v["parent"] == node]
         if not children: return
 
@@ -272,7 +272,8 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         margin=dict(l=20, r=20, t=40, b=20), height=700, transition={'duration': 500, 'easing': 'cubic-in-out'},
         showlegend=False, plot_bgcolor='#1a1a1a', paper_bgcolor='#1a1a1a')
 
-    return go.Figure(data=edge_traces + [node_trace], layout=layout)
+    fig = go.Figure(data=edge_traces + [node_trace], layout=layout)
+    return fig
 
 # === Dash Layout ===
 initial_state = get_initial_state()
@@ -287,14 +288,15 @@ app.layout = html.Div([
     html.Div(id="loading-output", style={"display": "none"}),
     html.Div([
         html.Div([
-            html.Div(
+    html.Div(
                 id="graph-container",
-                children=[
+        children=[
                     dcc.Graph(
                         id={"type": "graph", "key": 0},
                         figure=generate_figure(initial_state['node_data'], initial_state['clicked_nodes_list'], initial_state['last_clicked'], node_flash=None),
                         relayoutData=None,
-                        style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}
+                        style={"flex": "3 1 0%", "position": "relative", "zIndex": 1},
+                        config={"displayModeBar": False}
                     )
                 ]
             ),
@@ -343,7 +345,7 @@ def handle_interaction(clickData_list, input_submit, upload_contents, reset_clic
 
     def make_graph(fig, key):
         print(f"Rendering graph with id=graph-{key}")
-        return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1})
+        return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}, config={"displayModeBar": False})
 
     def autoscale_figure(fig):
         # Set autorange for xaxis and yaxis in the layout
@@ -527,7 +529,7 @@ def update_suggested_concepts(state):
         return ""
     # Render as clickable pill-shaped buttons
     return html.Div([
-        html.Div("You could now explore:", style={"color": "#c0c0c0", "fontSize": "1.18em", "marginBottom": "10px"}),
+        html.Div("You could now explore:", style={"color": "#c0c0c0", "fontSize": "1.30em", "marginBottom": "10px"}),
         html.Div([
             html.Button(term, id={"type": "suggested-term", "term": term}, n_clicks=0, style={
                 "display": "inline-block", "background": "#232a3a", "color": "#02ab13", "borderRadius": "18px", "padding": "7px 18px", "margin": "0 7px 7px 0", "fontWeight": 600, "fontSize": "1.05em", "boxShadow": "0 2px 8px rgba(2,171,19,0.07)", "border": "1.5px solid #02ab13", "cursor": "pointer", "transition": "background 0.2s, color 0.2s" 
@@ -587,7 +589,7 @@ def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key):
     new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
     fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
     def make_graph(fig, key):
-        return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1})
+        return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}, config={"displayModeBar": False})
     def autoscale_figure(fig):
         fig.update_layout(xaxis={"autorange": True}, yaxis={"autorange": True})
         return fig
@@ -628,5 +630,4 @@ def style_submit_btn(flash):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8050))
-    app.run(debug=True, port=port)
-    app.run(debug=True, host="0.0.0.0", port=port)
+    app.run(debug=False, host="0.0.0.0", port=port, dev_tools_ui=False, dev_tools_props_check=False)
