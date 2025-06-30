@@ -176,8 +176,11 @@ def rescale_positions(positions, target_radius=10.0):
     scale = target_radius / max_dist
     return {node: (x * scale, y * scale) for node, (x, y) in positions.items()}
 
-def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flash=None):
+def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flash=None, last_clicked=None):
     clicked_nodes = set(clicked_nodes_list)
+    # If last_clicked is not provided, use the last item in clicked_nodes_list if available
+    if last_clicked is None and clicked_nodes_list:
+        last_clicked = clicked_nodes_list[-1]
     positions = build_positions(node_data, focus_node=focus_node)
     positions = apply_force_directed_layout(positions, node_data)
     
@@ -227,14 +230,15 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
             size = size * 1.25
         sizes.append(size)
         labels.append(label)
+        # Node coloring logic
         if node == "start":
             color = "black"
+        elif node == last_clicked:
+            color = "#02ab13"  # light green for most recently clicked
         elif node in clicked_nodes:
-            color = "#02ab13"
+            color = "#047015"  # dark green for previously clicked
         else:
-            color = "#666666"
-        if node_flash is not None and node == node_flash:
-            color = "#ffff66"  
+            color = "#666666" 
         colors.append(color)
 
     if len(positions) < 2:
@@ -253,9 +257,16 @@ def generate_figure(node_data, clicked_nodes_list, focus_node="start", node_flas
         color = edge_colors[i//3] if i//3 < len(edge_colors) else '#888'
         edge_traces.append(go.Scatter(x=edge_xs[i:i+2], y=edge_ys[i:i+2], mode="lines", line=dict(width=3, color=color), hoverinfo="none", showlegend=False))
 
+    # Set customdata so that the start node is unclickable
+    customdata = []
+    for node in positions.keys():
+        if node == "start":
+            customdata.append(None)
+        else:
+            customdata.append(node)
     node_trace = go.Scatter(x=xs, y=ys, mode="markers+text", text=labels, textposition="top center", textfont=dict(color='#c0c0c0', size=12),
         marker=dict(size=sizes, color=colors, opacity=1, line=dict(width=2, color='#444444')),
-        customdata=list(positions.keys()), hoverinfo="text", selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1)))
+        customdata=customdata, hoverinfo="text", selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1)))
 
     layout = go.Layout(clickmode="event+select", xaxis=dict(visible=False, range=x_range), yaxis=dict(visible=False, range=y_range),
         margin=dict(l=20, r=20, t=40, b=20), height=700, transition={'duration': 500, 'easing': 'cubic-in-out'},
@@ -272,6 +283,7 @@ app.layout = html.Div([
     dcc.Store(id='graph-key', data=0),
     dcc.Store(id='input-flash', data=False),
     dcc.Store(id='node-flash', data=None),
+    dcc.Store(id='submit-btn-flash', data=False),
     html.Div(id="loading-output", style={"display": "none"}),
     html.Div([
         html.Div([
@@ -485,56 +497,9 @@ def toggle_overlay(visible):
     else:
         return {**base_style, "transform": "translate(-50%, -65%)", "opacity": 0, "pointerEvents": "none"}
 
-# --- IMMEDIATE INPUT FLASH CALLBACK ---
-@app.callback(
-    Output('input-flash', 'data', allow_duplicate=True),
-    [Input('start-input', 'n_submit'), Input('submit-btn', 'n_clicks')],
-    prevent_initial_call=True
-)
-def trigger_input_flash(n_submit, n_clicks):
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return dash.no_update
-    return True
 
-@app.callback(
-    Output('node-flash', 'data', allow_duplicate=True),
-    Input('node-flash', 'data'),
-    prevent_initial_call=True
-)
-def reset_node_flash(node):
-    if node is not None:
-        time.sleep(0.3)
-        return None
-    return dash.no_update
 
-# Input style callback
-@app.callback(
-    Output('start-input', 'style'),
-    Input('input-flash', 'data'),
-)
-def style_input_box(flash):
-    base_style = {
-        "padding": "12px 45px 12px 28px", "fontSize": "1.18em", "borderRadius": "9px", "backgroundColor": "#333333",
-        "border": "1.5px solid #888888", "color": "#e0e0e0", "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
-        "outline": "none", "width": "100%", "textAlign": "center", "boxSizing": "border-box"
-    }
-    if flash:
-        base_style["border"] = "2.5px solid #02ab13"
-        base_style["boxShadow"] = "0 0 16px 4px #02ab13"
-    return base_style
 
-# @app.callback(
-#     Output('graph-container', 'style'),
-#     Input('node-flash', 'data'),
-# )
-# def style_graph_container(node_flash):
-#     base_style = {"flex": "3 1 0%", "position": "relative", "minHeight": "700px", "borderRadius": "15px", "overflow": "hidden", "transition": "box-shadow 0.3s"}
-#     if node_flash is not None:
-#         base_style["boxShadow"] = "0 0 24px 6px #02ab13"
-#     else:
-#         base_style["boxShadow"] = "none"
-#     return base_style
 
 # --- SUGGESTED CONCEPTS CALLBACK ---
 @app.callback(
@@ -562,7 +527,7 @@ def update_suggested_concepts(state):
         return ""
     # Render as clickable pill-shaped buttons
     return html.Div([
-        html.Div("You could now explore:", style={"color": "#c0c0c0", "fontSize": "1.08em", "marginBottom": "10px"}),
+        html.Div("You could now explore:", style={"color": "#c0c0c0", "fontSize": "1.18em", "marginBottom": "10px"}),
         html.Div([
             html.Button(term, id={"type": "suggested-term", "term": term}, n_clicks=0, style={
                 "display": "inline-block", "background": "#232a3a", "color": "#02ab13", "borderRadius": "18px", "padding": "7px 18px", "margin": "0 7px 7px 0", "fontWeight": 600, "fontSize": "1.05em", "boxShadow": "0 2px 8px rgba(2,171,19,0.07)", "border": "1.5px solid #02ab13", "cursor": "pointer", "transition": "background 0.2s, color 0.2s" 
@@ -630,6 +595,36 @@ def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key):
     new_key = graph_key + 1
     info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
     return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, True, None
+
+# --- SUBMIT BUTTON FLASH CALLBACKS ---
+@app.callback(
+    Output('submit-btn-flash', 'data', allow_duplicate=True),
+    [Input('start-input', 'n_submit'), Input('submit-btn', 'n_clicks')],
+    prevent_initial_call=True
+)
+def trigger_submit_btn_flash(n_submit, n_clicks):
+    from dash import callback_context
+    ctx = callback_context
+    if not ctx.triggered:
+        return dash.no_update
+    return True
+
+@app.callback(
+    Output('submit-btn', 'style'),
+    Input('submit-btn-flash', 'data'),
+)
+def style_submit_btn(flash):
+    base_style = {
+        "position": "absolute", "right": "8px", "top": "50%", "transform": "translateY(-50%)", "width": "32px", "height": "32px",
+        "borderRadius": "50%", "border": "none", "backgroundColor": "#555", "color": "#e0e0e0", "fontSize": "20px",
+        "cursor": "pointer", "display": "flex", "alignItems": "center", "justifyContent": "center", "paddingBottom": "4px",
+        "transition": "box-shadow 1.2s, background 1.2s, color 1.2s"
+    }
+    if flash:
+        base_style["backgroundColor"] = "#fff"
+        base_style["color"] = "#02ab13"
+        base_style["boxShadow"] = "0 0 24px 8px #f0fff0"
+    return base_style
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8050))
