@@ -10,10 +10,6 @@ dependencies = [
     "numpy",
     "requests",
     "gunicorn>=20.0.4",
+    "google-generativeai",
 ]
 
-# Optional dependencies
-[project.optional-dependencies]
-modal = [
-    "modal>=0.1.0",
-]
