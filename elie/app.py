@@ -8,7 +8,7 @@ import json
 from dash import ctx
 import base64
 from elie.gemini_calls import call_gemini_llm
-from elie.prompting import build_starter_prompt, parse_terms, build_further_prompt, build_final_prompt, get_more_concepts
+from elie.prompting import build_starter_prompt, parse_terms, build_further_prompt, build_short_final_prompt, get_more_concepts, build_long_final_prompt
 import time
 
 app = dash.Dash(__name__)
@@ -50,6 +50,31 @@ HOW_IT_WORKS_MD = """## How It Works
 
 4. **Iterate to expertise:** Keep choosing unknown concepts; the map updates and the explanation sharpens until it's perfectly pitched to your expertise.
 """
+
+# Place this at the top level, after imports and before app.layout
+explanation_reload = html.Button(
+    "\u21bb", id="reload-explanation-btn", title="Reload explanation", n_clicks=0,
+    style={
+        "background": "none", "border": "none", "color": "#c0c0c0", "fontSize": "2.1em", "cursor": "pointer", "marginRight": "16px", "padding": "0 24px 0 0", "verticalAlign": "middle", "minWidth": "64px", "height": "48px"
+    }
+)
+# The toggle icon will be filled (\u25CF) for long, empty (\u25CB) for short
+# We'll set the icon in the callback
+
+def get_toggle_button(length_flag):
+    icon = "\U0001F4D6"  # 📖
+    if length_flag == "short":
+        bg = "none"
+        color = "#c0c0c0"
+    else:
+        bg = "#02ab13"
+        color = "#fff"
+    return html.Button(
+        icon, id="toggle-explanation-btn", title="Toggle short/long explanation", n_clicks=0,
+        style={
+            "background": bg, "border": "none", "color": color, "fontSize": "2.1em", "cursor": "pointer", "padding": "0 24px", "verticalAlign": "middle", "float": "right", "minWidth": "64px", "height": "48px", "borderRadius": "12px", "transition": "background 0.2s, color 0.2s"
+        }
+    )
 
 def get_initial_state():
     """Returns the default state for the application."""
@@ -285,6 +310,7 @@ app.layout = html.Div([
     dcc.Store(id='input-flash', data=False),
     dcc.Store(id='node-flash', data=None),
     dcc.Store(id='submit-btn-flash', data=False),
+    dcc.Store(id='explanation-length-flag', data='short'),
     html.Div(id="loading-output", style={"display": "none"}),
     html.Div([
         html.Div([
@@ -334,9 +360,9 @@ app.layout = html.Div([
      Output("graph-key", "data"), Output("input-flash", "data"), Output("node-flash", "data")],
     [Input({'type': 'graph', 'key': ALL}, 'clickData'), Input("start-input", "n_submit"), Input("upload-graph", "contents"),
      Input("reset-term-btn", "n_clicks"), Input("submit-btn", "n_clicks")],
-    [State("start-input", "value"), State("app-state-store", "data"), State("graph-key", "data")]
+    [State("start-input", "value"), State("app-state-store", "data"), State("graph-key", "data"), State("explanation-length-flag", "data")]
 )
-def handle_interaction(clickData_list, input_submit, upload_contents, reset_clicks, submit_clicks, user_input, state, graph_key):
+def handle_interaction(clickData_list, input_submit, upload_contents, reset_clicks, submit_clicks, user_input, state, graph_key, explanation_length_flag):
     ctx = dash.callback_context
     trigger_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
 
@@ -374,7 +400,14 @@ def handle_interaction(clickData_list, input_submit, upload_contents, reset_clic
         }
         recompute_all_distances(new_state['node_data'])
         term = new_state['node_data']['start'].get('label', 'start')
-        info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        info = [
+            html.Div([
+                explanation_reload,
+                html.H4(f"About {term}", style={"color": "#c0c0c0", "margin": 0, "marginLeft": "10px", "fontWeight": 700, "fontSize": "1.2em", "verticalAlign": "middle"}),
+                get_toggle_button(explanation_length_flag)
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "10px", "width": "100%"}),
+            dcc.Markdown(new_state['explanation_paragraph'])
+        ]
         fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
         fig = autoscale_figure(fig)
         new_key = graph_key + 1
@@ -410,9 +443,19 @@ def handle_interaction(clickData_list, input_submit, upload_contents, reset_clic
             "unclicked_nodes": [k for k in node_data.keys() if k != "start"],
             "last_clicked": "start"
         }
-        new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
+        if explanation_length_flag == 'short':
+            new_state["explanation_paragraph"] = call_gemini_llm(build_short_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
+        else:
+            new_state["explanation_paragraph"] = call_gemini_llm(build_long_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
         
-        info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        info = [
+            html.Div([
+                explanation_reload,
+                html.H4(f"About {term}", style={"color": "#c0c0c0", "margin": 0, "marginLeft": "10px", "fontWeight": 700, "fontSize": "1.2em", "verticalAlign": "middle"}),
+                get_toggle_button(explanation_length_flag)
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "10px", "width": "100%"}),
+            dcc.Markdown(new_state['explanation_paragraph'])
+        ]
         fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
         fig = autoscale_figure(fig)
         new_key = graph_key + 1
@@ -457,12 +500,19 @@ def handle_interaction(clickData_list, input_submit, upload_contents, reset_clic
                         new_state['unclicked_nodes'].append(child_term)
 
             recompute_all_distances(new_state['node_data'])
-            new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(initial_term, new_state['unclicked_nodes'], new_state['clicked_nodes_list']))
+            # Do NOT update new_state['explanation_paragraph'] here
         else:
             print(f"Node '{clicked}' already clicked. No graph update.")
         new_state['last_clicked'] = clicked
         term = new_state['node_data']['start'].get('label', 'start')
-        info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+        info = [
+            html.Div([
+                explanation_reload,
+                html.H4(f"About {term}", style={"color": "#c0c0c0", "margin": 0, "marginLeft": "10px", "fontWeight": 700, "fontSize": "1.2em", "verticalAlign": "middle"}),
+                get_toggle_button(explanation_length_flag)
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "10px", "width": "100%"}),
+            dcc.Markdown(new_state['explanation_paragraph'])
+        ]
         fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=clicked)
         fig = autoscale_figure(fig)
         new_key = graph_key + 1
@@ -543,10 +593,10 @@ def update_suggested_concepts(state):
      Output("input-overlay-visible", "data", allow_duplicate=True), Output("start-input", "value", allow_duplicate=True), Output("app-state-store", "data", allow_duplicate=True),
      Output("graph-key", "data", allow_duplicate=True), Output("input-flash", "data", allow_duplicate=True), Output("node-flash", "data", allow_duplicate=True)],
     [Input({'type': 'suggested-term', 'term': ALL}, 'n_clicks')],
-    [State({'type': 'suggested-term', 'term': ALL}, 'id'), State("app-state-store", "data"), State("graph-key", "data")],
+    [State({'type': 'suggested-term', 'term': ALL}, 'id'), State("app-state-store", "data"), State("graph-key", "data"), State("explanation-length-flag", "data")],
     prevent_initial_call=True
 )
-def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key):
+def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key, explanation_length_flag):
     from dash import callback_context
     ctx = callback_context
     # Find which button was clicked (n_clicks just incremented)
@@ -586,7 +636,10 @@ def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key):
         "unclicked_nodes": [k for k in node_data.keys() if k != "start"],
         "last_clicked": "start"
     }
-    new_state["explanation_paragraph"] = call_gemini_llm(build_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
+    if explanation_length_flag == 'short':
+        new_state["explanation_paragraph"] = call_gemini_llm(build_short_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
+    else:
+        new_state["explanation_paragraph"] = call_gemini_llm(build_long_final_prompt(term, new_state['clicked_nodes_list'], new_state['unclicked_nodes']))
     fig = generate_figure(new_state['node_data'], new_state['clicked_nodes_list'], new_state['last_clicked'], node_flash=None)
     def make_graph(fig, key):
         return dcc.Graph(id={"type": "graph", "key": key}, figure=fig, relayoutData=None, style={"flex": "3 1 0%", "position": "relative", "zIndex": 1}, config={"displayModeBar": False})
@@ -595,7 +648,14 @@ def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key):
         return fig
     fig = autoscale_figure(fig)
     new_key = graph_key + 1
-    info = [html.H4(f"About {term}", style={"color": "#c0c0c0"}), dcc.Markdown(new_state['explanation_paragraph'])]
+    info = [
+        html.Div([
+            explanation_reload,
+            html.H4(f"About {term}", style={"color": "#c0c0c0", "margin": 0, "fontWeight": 700, "fontSize": "1.2em", "verticalAlign": "middle"}),
+            get_toggle_button(explanation_length_flag)
+        ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "10px", "width": "100%"}),
+        dcc.Markdown(new_state['explanation_paragraph'])
+    ]
     return make_graph(fig, new_key), info, dash.no_update, False, dash.no_update, new_state, new_key, True, None
 
 # --- SUBMIT BUTTON FLASH CALLBACKS ---
@@ -627,6 +687,44 @@ def style_submit_btn(flash):
         base_style["color"] = "#02ab13"
         base_style["boxShadow"] = "0 0 24px 8px #f0fff0"
     return base_style
+
+@app.callback(
+    Output('explanation-length-flag', 'data'),
+    Input('toggle-explanation-btn', 'n_clicks'),
+    State('explanation-length-flag', 'data'),
+    prevent_initial_call=True
+)
+def toggle_explanation_length(n_clicks, current_flag):
+    if n_clicks is None:
+        return current_flag
+    return 'long' if current_flag == 'short' else 'short'
+
+@app.callback(
+    Output('info-box', 'children', allow_duplicate=True),
+    [Input('reload-explanation-btn', 'n_clicks'), Input('explanation-length-flag', 'data')],
+    [State('app-state-store', 'data')],
+    prevent_initial_call=True
+)
+def reload_explanation(n_reload, length_flag, state):
+    node_data = state.get('node_data', {})
+    if not node_data or not node_data.get('start', {}).get('label'):
+        return dash.no_update
+    term = node_data['start'].get('label', 'start')
+    included = state.get('clicked_nodes_list', [])
+    excluded = state.get('unclicked_nodes', [])
+    if length_flag == 'short':
+        explanation = call_gemini_llm(build_short_final_prompt(term, included, excluded))
+    else:
+        explanation = call_gemini_llm(build_long_final_prompt(term, included, excluded))
+    info = [
+        html.Div([
+            explanation_reload,
+            html.H4(f"About {term}", style={"color": "#c0c0c0", "margin": 0, "fontWeight": 700, "fontSize": "1.2em", "verticalAlign": "middle"}),
+            get_toggle_button(length_flag)
+        ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "10px", "width": "100%"}),
+        dcc.Markdown(explanation)
+    ]
+    return info
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8050))

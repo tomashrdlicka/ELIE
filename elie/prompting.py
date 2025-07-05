@@ -27,14 +27,27 @@ def build_further_prompt(concept, excluded_concepts, included_concepts):
     )
 
 
-def build_final_prompt(concept, included_concepts, excluded_concepts):
+def build_short_final_prompt(concept, included_concepts, excluded_concepts):
     return (
         f"Given that I understand {', '.join(included_concepts)} and I do not understand {', '.join(excluded_concepts)}, "
         f"please explain {concept} to me. Make the explanation concise and clear and make sure to take into account what "
         f"topics I know and which I do not know. Given the context that I provided go directly to the explanation and do not "
         f"repeat to me what I already know. If suitable, use analogies related to the concepts I do know to fill in the gaps "
         f"caused by the terms I do not know."
+        f"Make sure that the explanation is very concise and to the point. Do not repeat what I already know."
     )
+    
+def build_long_final_prompt(concept, included_concepts, excluded_concepts):
+    return (
+        f"Given that I understand {', '.join(included_concepts)} and I do not understand {', '.join(excluded_concepts)}, "
+        f"please explain {concept} to me. Make the explanation clear and make sure to take into account what "
+        f"topics I know and which I do not know. Given the context that I provided go directly to the explanation and do not "
+        f"repeat to me what I already know. If suitable, use analogies related to the concepts I do know to fill in the gaps "
+        f"caused by the terms I do not know."
+        f"Make sure that the explanation is detailed and to the point. Do not repeat what I already know."
+    )
+    
+    
     
 def get_more_concepts(included_concepts, excluded_concepts):
     return (
