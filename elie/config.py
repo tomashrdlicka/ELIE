@@ -203,6 +203,21 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; background-color:
 .spin-animation {
     animation: spin 1s linear infinite;
     transform-origin: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.toggle-btn:hover {
+    transform: scale(1.1);
+}
+.reload-btn:hover {
+    transform: scale(1.1);
+}
+.reload-btn:active {
+    transform: scale(0.95);
+}
+.toggle-btn:active {
+    transform: scale(0.95);
 }
 """
 

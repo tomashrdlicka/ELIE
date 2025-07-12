@@ -28,7 +28,7 @@ def create_data_stores(initial_state):
     """Create all dcc.Store components for app state management"""
     return [
         dcc.Store(id='app-state-store', data=initial_state),
-        dcc.Store(id='input-overlay-visible'),
+        dcc.Store(id='input-overlay-visible', data=True),
         dcc.Store(id='graph-key', data=0),
         dcc.Store(id='input-flash', data=False),
         dcc.Store(id='node-flash', data=None),
@@ -38,18 +38,14 @@ def create_data_stores(initial_state):
         dcc.Store(id='reload-spinning', data=False),
         dcc.Store(id='reload-triggered', data=False),
         dcc.Store(id='reload-last-click', data=0),  # Track last reload button click count
+
     ]
 
 
 def create_timers():
     """Create dcc.Interval components for animations"""
     return [
-        dcc.Interval(
-            id='animation-timer',
-            interval=ANIMATION_CONFIG["toggle_duration"],
-            n_intervals=0,
-            disabled=True
-        ),
+
         dcc.Interval(
             id='reload-timer',
             interval=ANIMATION_CONFIG["reload_timer_interval"],
@@ -60,20 +56,14 @@ def create_timers():
     ]
 
 
-def create_toggle_button(length_flag="short", animating=False):
-    """Create the toggle explanation length button"""
+def create_toggle_button(length_flag="short"):
+    """Create the toggle explanation length button with simple visual feedback"""
     icon = ICONS["toggle"]
     
-    if length_flag == "short":
-        bg = "none"
-        color = COLORS["text_primary"]
-    else:
-        bg = COLORS["accent_green"]
-        color = "#fff"
-    
-    box_shadow = "0 0 0 0 #00ff00"  # default no glow
-    if animating:
-        box_shadow = f"0 0 24px 8px {COLORS['accent_green_glow']}"
+    # Green outline when mode is 'long'
+    border = "2px solid transparent"
+    if length_flag == "long":
+        border = f"2px solid {COLORS['accent_green']}"
     
     return html.Button(
         icon,
@@ -81,18 +71,19 @@ def create_toggle_button(length_flag="short", animating=False):
         title="Toggle short/long explanation",
         style={
             **BUTTON_STYLES["base"],
-            "background": bg,
-            "color": color,
+            "background": "none",
+            "color": COLORS["text_primary"],
             "fontSize": "2.1em",
-            "padding": "0 24px",
+            "padding": "0 34px",
             "verticalAlign": "middle",
             "float": "right",
             "minWidth": "64px",
             "height": "48px",
             "borderRadius": "12px",
-            "transition": "background 0.2s, color 0.2s, box-shadow 0.7s cubic-bezier(.4,2,.6,1)",
-            "boxShadow": box_shadow
-        }
+            "transition": "all 0.2s ease",
+            "border": border,
+        },
+        className="toggle-btn"  # Add CSS class for hover effects
     )
 
 
@@ -104,12 +95,15 @@ def create_reload_button(spinning=False):
         "color": COLORS["text_primary"],
         "fontSize": "2.1em",
         "marginRight": "16px",
-        "padding": "0 24px 0 0",
+        "padding": "0",
         "verticalAlign": "middle",
         "minWidth": "64px",
         "height": "48px",
         "transition": "transform 0.2s",
         "transformOrigin": "center",
+        "display": "flex",  # Add flex display
+        "alignItems": "center",  # Center vertically
+        "justifyContent": "center",  # Center horizontally
     }
     
     # Use CSS class for spinning animation instead of inline animation
@@ -121,7 +115,7 @@ def create_reload_button(spinning=False):
         title="Reload explanation",
         n_clicks=0,
         style=style,
-        className=class_name
+        className=f"reload-btn {class_name}".strip()
     )
 
 
@@ -198,7 +192,7 @@ def create_graph_component(figure, graph_key):
     )
 
 
-def create_info_box_content(term=None, explanation="", length_flag="short", animating=False, spinning=False):
+def create_info_box_content(term=None, explanation="", length_flag="short", spinning=False):
     """Create the content for the info box"""
     if term is None:
         # Return welcome message for initial state
@@ -222,7 +216,7 @@ def create_info_box_content(term=None, explanation="", length_flag="short", anim
                     "verticalAlign": "middle"
                 }
             ),
-            create_toggle_button(length_flag, animating=animating)
+            create_toggle_button(length_flag)
         ], style={
             "display": "flex",
             "alignItems": "center",

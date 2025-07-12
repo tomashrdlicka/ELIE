@@ -65,7 +65,7 @@ def parse_terms(response, num_terms=4):
     verbose_matches = re.findall(verbose_pattern, response)
 
     result = {}
-
+    print(response)
     if verbose_matches:
         for i, (term, distance, breadth) in enumerate(verbose_matches):
             if i >= num_terms:

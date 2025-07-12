@@ -11,14 +11,14 @@ from config import DEFAULT_PORT, HTML_TEMPLATE
 from components import (
     create_data_stores, create_timers, create_control_panel, 
     create_info_box, create_graph_container, create_sidebar, 
-    create_main_layout, create_graph_component
+    create_main_layout, create_graph_component, create_info_box_content
 )
 from state_manager import StateManager
 from graph_manager import GraphManager
 from callback_handlers import CallbackHandlers
 
 # Initialize Dash app
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
 
 # Set custom HTML template
@@ -42,17 +42,13 @@ def create_app_layout():
     # Create layout sections
     data_stores = create_data_stores(initial_state)
     timers = create_timers()
-    
+
     # Create UI sections
     graph_container = create_graph_container(initial_graph)
     control_panel = create_control_panel()
     
-    # Create initial info box content
-    from components import create_info_box_content
-    initial_info_content = create_info_box_content(
-        explanation=initial_state['explanation_paragraph']
-    )
-    info_box = create_info_box(initial_info_content)
+    # Create empty info box - content will be set by the UI callback
+    info_box = create_info_box([])
     
     sidebar = create_sidebar(control_panel, info_box)
     

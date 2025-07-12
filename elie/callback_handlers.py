@@ -13,7 +13,7 @@ from graph_manager import GraphManager
 
 
 class CallbackHandlers:
-    """Organizes and manages all app callbacks"""
+    """Organizes and manages all app callbacks with decoupled architecture"""
     
     def __init__(self, app):
         self.app = app
@@ -22,7 +22,7 @@ class CallbackHandlers:
     def register_all_callbacks(self):
         """Register all callbacks with the app"""
         self.register_initialization_callbacks()
-        self.register_interaction_callbacks()
+        self.register_state_interaction_callbacks()
         self.register_control_callbacks()
         self.register_animation_callbacks()
         self.register_ui_callbacks()
@@ -31,35 +31,31 @@ class CallbackHandlers:
         """Register callbacks for app initialization and reset"""
         
         @self.app.callback(
-            [Output("graph-container", "children", allow_duplicate=True), 
-             Output("info-box", "children", allow_duplicate=True), 
-             Output("upload-graph", "contents", allow_duplicate=True),
-             Output("input-overlay-visible", "data", allow_duplicate=True), 
-             Output("start-input", "value", allow_duplicate=True), 
-             Output("app-state-store", "data", allow_duplicate=True),
-             Output("graph-key", "data", allow_duplicate=True), 
-             Output("input-flash", "data", allow_duplicate=True), 
-             Output("node-flash", "data", allow_duplicate=True),
-             Output('explanation-length-flag', 'data', allow_duplicate=True),
-             Output('toggle-animating', 'data', allow_duplicate=True),
+            [Output("graph-container", "children"), 
+             Output("upload-graph", "contents"),
+             Output("input-overlay-visible", "data"), 
+             Output("start-input", "value"), 
+             Output("app-state-store", "data"),
+             Output("graph-key", "data"), 
+             Output("input-flash", "data"), 
+             Output("node-flash", "data"),
+             Output('toggle-animating', 'data'),
              Output('submit-btn-flash', 'data', allow_duplicate=True),
              Output('reload-triggered', 'data', allow_duplicate=True),
-             Output('reload-spinning', 'data', allow_duplicate=True),
-             Output('reload-last-click', 'data', allow_duplicate=True),
-             Output('reload-timer', 'n_intervals', allow_duplicate=True)],
+             Output('reload-spinning', 'data'),
+             Output('reload-last-click', 'data'),
+             Output('reload-timer', 'n_intervals'),
+             Output('explanation-length-flag', 'data')],
             [Input("reset-term-btn", "n_clicks")],
             [State("graph-key", "data")],
-            prevent_initial_call='initial_duplicate'
+            prevent_initial_call=True
         )
         def initialize_app(reset_clicks, graph_key):
-            """Handle initial page load and reset button clicks"""
+            """Handle reset button clicks - completely separate from info-box updates"""
             print("Initializing app state...")
             
             # Create initial state
             initial_state = StateManager.get_initial_state()
-            
-            # Create initial info box (welcome message, no controls)
-            info = create_info_box_content(explanation=initial_state['explanation_paragraph'])
             
             # Create initial graph
             fig = GraphManager.generate_figure(
@@ -75,7 +71,6 @@ class CallbackHandlers:
             
             return (
                 [graph_component], 
-                info, 
                 None,  # clear upload contents
                 True,  # show input overlay
                 "",    # clear input value
@@ -83,28 +78,27 @@ class CallbackHandlers:
                 new_key, 
                 False, # no input flash
                 None,  # no node flash
-                'short',  # reset to short explanation
                 False,    # no toggle animation
                 False,     # no submit button flash
                 False,     # no reload triggered
                 False,     # no reload spinning
                 0,         # reset reload last click count
-                0          # reset reload timer intervals
+                0,         # reset reload timer intervals
+                'short'    # reset explanation length flag to short
             )
     
-    def register_interaction_callbacks(self):
-        """Register callbacks for main user interactions"""
+    def register_state_interaction_callbacks(self):
+        """Register callbacks that only update state and graph - NO UI UPDATES"""
         
         @self.app.callback(
-            [Output("graph-container", "children"), 
-             Output("info-box", "children"), 
-             Output("upload-graph", "contents"),
-             Output("input-overlay-visible", "data"), 
-             Output("start-input", "value"), 
-             Output("app-state-store", "data"),
-             Output("graph-key", "data"), 
-             Output("input-flash", "data"), 
-             Output("node-flash", "data")],
+            [Output("graph-container", "children", allow_duplicate=True), 
+             Output("upload-graph", "contents", allow_duplicate=True),
+             Output("input-overlay-visible", "data", allow_duplicate=True), 
+             Output("start-input", "value", allow_duplicate=True), 
+             Output("app-state-store", "data", allow_duplicate=True),
+             Output("graph-key", "data", allow_duplicate=True), 
+             Output("input-flash", "data", allow_duplicate=True), 
+             Output("node-flash", "data", allow_duplicate=True)],
             [Input({'type': 'graph', 'key': ALL}, 'clickData'), 
              Input("start-input", "n_submit"), 
              Input("upload-graph", "contents"),
@@ -112,41 +106,31 @@ class CallbackHandlers:
             [State("start-input", "value"), 
              State("app-state-store", "data"), 
              State("graph-key", "data"), 
-             State("explanation-length-flag", "data"), 
-             State("toggle-animating", "data"), 
-             State("reload-spinning", "data")],
+             State("explanation-length-flag", "data")],
             prevent_initial_call=True
         )
         def handle_interaction(clickData_list, input_submit, upload_contents, submit_clicks, 
-                             user_input, state, graph_key, explanation_length_flag, 
-                             toggle_animating, reload_spinning):
-            """Handle all main interactions after initialization"""
-            print(f"[handle_interaction] explanation_length_flag: {explanation_length_flag}")
-            
+                             user_input, state, graph_key, explanation_length_flag):
+            """Handle all main interactions - GRAPH AND STATE ONLY"""
             trigger_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
             clickData = next((cd for cd in clickData_list if cd), None)
 
-            # Handle file upload
             if trigger_id == "upload-graph" and upload_contents is not None:
                 return self._handle_file_upload(upload_contents, explanation_length_flag, 
-                                               toggle_animating, graph_key)
+                                               graph_key)
             
-            # Handle root concept submission
             if (trigger_id == "start-input" or trigger_id == "submit-btn") and user_input:
                 return self._handle_concept_submission(user_input.strip(), explanation_length_flag, 
-                                                     toggle_animating, graph_key)
+                                                     graph_key)
             
-            # Handle node clicks
             if clickData and "points" in clickData:
                 return self._handle_node_click(clickData, state, explanation_length_flag, 
-                                             toggle_animating, graph_key)
+                                             graph_key)
             
-            print("No update triggered.")
-            return [no_update] * 9
+            return [no_update] * 8
         
         @self.app.callback(
             [Output("graph-container", "children", allow_duplicate=True), 
-             Output("info-box", "children", allow_duplicate=True), 
              Output("upload-graph", "contents", allow_duplicate=True),
              Output("input-overlay-visible", "data", allow_duplicate=True), 
              Output("start-input", "value", allow_duplicate=True), 
@@ -158,15 +142,14 @@ class CallbackHandlers:
             [State({'type': 'suggested-term', 'term': ALL}, 'id'), 
              State("app-state-store", "data"), 
              State("graph-key", "data"), 
-             State("explanation-length-flag", "data"), 
-             State("toggle-animating", "data")],
+             State("explanation-length-flag", "data")],
             prevent_initial_call=True
         )
         def handle_suggested_term_click(all_n_clicks, all_btn_ids, state, graph_key, 
-                                      explanation_length_flag, toggle_animating):
-            """Handle suggested term button clicks"""
+                                      explanation_length_flag):
+            """Handle suggested term button clicks - GRAPH AND STATE ONLY"""
             if not ctx.triggered or not all_n_clicks or not all_btn_ids:
-                return [no_update] * 9
+                return [no_update] * 8
             
             # Find which button was clicked
             clicked_idx = None
@@ -176,20 +159,19 @@ class CallbackHandlers:
                     break
             
             if clicked_idx is None:
-                return [no_update] * 9
+                return [no_update] * 8
             
             term = all_btn_ids[clicked_idx]['term']
             print(f"[SUGGESTED TERM CLICKED] {term}")
             
             return self._handle_concept_submission(term, explanation_length_flag, 
-                                                 toggle_animating, graph_key, flash_input=True)
+                                                 graph_key, flash_input=True)
     
     def register_control_callbacks(self):
         """Register callbacks for control buttons (toggle, reload)"""
         
         @self.app.callback(
-            [Output('explanation-length-flag', 'data'),
-             Output('toggle-animating', 'data'),
+            [Output('explanation-length-flag', 'data', allow_duplicate=True),
              Output('app-state-store', 'data', allow_duplicate=True)],
             Input('toggle-explanation-btn', 'n_clicks'),
             [State('explanation-length-flag', 'data'),
@@ -199,23 +181,22 @@ class CallbackHandlers:
         def toggle_explanation_length(n_clicks, current_flag, state):
             """Toggle explanation length and regenerate"""
             if n_clicks is None:
-                return current_flag, False, no_update
+                return current_flag, no_update
             
             new_flag = 'long' if current_flag == 'short' else 'short'
-            print(f"[toggle_explanation_length] Toggling to: {new_flag}")
             
             if not StateManager.has_valid_concept(state):
-                return new_flag, True, no_update
+                return new_flag, no_update
             
             new_state = StateManager.update_explanation_length(state, new_flag)
-            return new_flag, True, new_state
+            return new_flag, new_state
         
         @self.app.callback(
-            [Output('reload-triggered', 'data'),
-             Output('reload-spinning', 'data'),
-             Output('reload-timer', 'disabled'),
-             Output('reload-last-click', 'data'),
-             Output('reload-timer', 'n_intervals')],
+            [Output('reload-triggered', 'data', allow_duplicate=True),
+             Output('reload-spinning', 'data', allow_duplicate=True),
+             Output('reload-timer', 'disabled', allow_duplicate=True),
+             Output('reload-last-click', 'data', allow_duplicate=True),
+             Output('reload-timer', 'n_intervals', allow_duplicate=True)],
             Input('reload-explanation-btn', 'n_clicks'),
             State('reload-last-click', 'data'),
             prevent_initial_call=True
@@ -278,7 +259,7 @@ class CallbackHandlers:
         """Register callbacks for animations and visual effects"""
         
         @self.app.callback(
-            Output('submit-btn-flash', 'data'),
+            Output('submit-btn-flash', 'data', allow_duplicate=True),
             [Input('start-input', 'n_submit'), Input('submit-btn', 'n_clicks')],
             prevent_initial_call=True
         )
@@ -286,40 +267,20 @@ class CallbackHandlers:
             """Trigger submit button flash animation"""
             return True if ctx.triggered else no_update
         
-        @self.app.callback(
-            Output('animation-timer', 'disabled'),
-            Input('toggle-animating', 'data'),
-            prevent_initial_call=True
-        )
-        def manage_animation_timer(animating):
-            """Enable/disable the animation timer based on animation state"""
-            return not animating
-        
-        @self.app.callback(
-            Output('toggle-animating', 'data', allow_duplicate=True),
-            Input('animation-timer', 'n_intervals'),
-            State('toggle-animating', 'data'),
-            prevent_initial_call=True
-        )
-        def reset_toggle_animation_on_timer(n_intervals, animating):
-            """Reset toggle animation when timer fires"""
-            if animating and n_intervals > 0:
-                return False
-            return no_update
+
     
     def register_ui_callbacks(self):
-        """Register callbacks for UI updates and styling"""
+        """Register callbacks for UI updates ONLY - these have exclusive ownership of UI elements"""
         
         @self.app.callback(
-            Output('info-box', 'children', allow_duplicate=True),
+            Output('info-box', 'children'),
             [Input('app-state-store', 'data'),
              Input('explanation-length-flag', 'data'),
-             Input('toggle-animating', 'data'),
              Input('reload-spinning', 'data')],
-            prevent_initial_call=True
+            prevent_initial_call=False
         )
-        def update_info_box_on_state_change(state, length_flag, toggle_animating, reload_spinning):
-            """Update info box when state, flag, or animation states change"""
+        def update_info_box_on_state_change(state, length_flag, reload_spinning):
+            """Update info box when state, flag, or reload state changes - EXCLUSIVE OWNERSHIP"""
             if not StateManager.has_valid_concept(state):
                 return create_info_box_content(explanation=state.get('explanation_paragraph', ''))
             
@@ -327,8 +288,7 @@ class CallbackHandlers:
             explanation = state.get('explanation_paragraph', '')
             
             return create_info_box_content(
-                term=term, explanation=explanation, length_flag=length_flag,
-                animating=toggle_animating, spinning=reload_spinning
+                term=term, explanation=explanation, length_flag=length_flag, spinning=reload_spinning
             )
         
         @self.app.callback(
@@ -358,19 +318,11 @@ class CallbackHandlers:
                        "opacity": 0, "pointerEvents": "none"}
     
     # Helper methods for complex interactions
-    def _handle_file_upload(self, upload_contents, explanation_length_flag, toggle_animating, graph_key):
+    def _handle_file_upload(self, upload_contents, explanation_length_flag, graph_key):
         """Handle file upload and state loading"""
-        print("Graph loaded from file, forcing graph re-render with new key.")
-        
         new_state = StateManager.load_state_from_upload(upload_contents)
         if not new_state:
-            return [no_update] * 9
-        
-        term = StateManager.get_current_term(new_state)
-        info = create_info_box_content(
-            term=term, explanation=new_state['explanation_paragraph'],
-            length_flag=explanation_length_flag, animating=toggle_animating
-        )
+            return [no_update] * 8
         
         fig = GraphManager.generate_figure(
             new_state['node_data'], new_state['clicked_nodes_list'], 
@@ -378,26 +330,18 @@ class CallbackHandlers:
         )
         fig = GraphManager.autoscale_figure(fig)
         new_key = graph_key + 1
-        
         graph_component = create_graph_component(fig, new_key)
         
-        return ([graph_component], info, None, False, no_update, 
+        return ([graph_component], None, False, no_update, 
                 new_state, new_key, False, None)
     
-    def _handle_concept_submission(self, term, explanation_length_flag, toggle_animating, 
+    def _handle_concept_submission(self, term, explanation_length_flag, 
                                  graph_key, flash_input=False):
         """Handle new concept submission"""
-        print(f"Root concept submitted: {term}. Forcing graph re-render with new key.")
-        
-        new_state = StateManager.create_new_concept_map(term, explanation_length_flag)
+        # Always use 'short' for new concepts to ensure consistent behavior
+        new_state = StateManager.create_new_concept_map(term, 'short')
         if not new_state:
-            print("Failed to create concept map.")
-            return [no_update] * 9
-        
-        info = create_info_box_content(
-            term=term, explanation=new_state['explanation_paragraph'],
-            length_flag=explanation_length_flag, animating=toggle_animating
-        )
+            return [no_update] * 8
         
         fig = GraphManager.generate_figure(
             new_state['node_data'], new_state['clicked_nodes_list'], 
@@ -405,28 +349,19 @@ class CallbackHandlers:
         )
         fig = GraphManager.autoscale_figure(fig)
         new_key = graph_key + 1
-        
         graph_component = create_graph_component(fig, new_key)
         
-        return ([graph_component], info, no_update, False, no_update, 
+        return ([graph_component], no_update, False, no_update, 
                 new_state, new_key, flash_input, None)
     
-    def _handle_node_click(self, clickData, state, explanation_length_flag, toggle_animating, graph_key):
+    def _handle_node_click(self, clickData, state, explanation_length_flag, graph_key):
         """Handle node click interactions"""
         clicked = clickData["points"][0].get("customdata")
         if not clicked or (clicked == "start" and clicked in state['clicked_nodes_list']):
-            print("Graph click ignored (clicked start or already clicked).")
-            return [no_update] * 9
+            return [no_update] * 8
         
         if clicked not in state['clicked_nodes_list']:
-            print(f"Node '{clicked}' clicked, forcing graph re-render with new key.")
             new_state = StateManager.expand_concept_map(state, clicked)
-            
-            term = StateManager.get_current_term(new_state)
-            info = create_info_box_content(
-                term=term, explanation=new_state['explanation_paragraph'],
-                length_flag=explanation_length_flag, animating=toggle_animating
-            )
             
             fig = GraphManager.generate_figure(
                 new_state['node_data'], new_state['clicked_nodes_list'], 
@@ -434,11 +369,9 @@ class CallbackHandlers:
             )
             fig = GraphManager.autoscale_figure(fig)
             new_key = graph_key + 1
-            
             graph_component = create_graph_component(fig, new_key)
             
-            return ([graph_component], no_update, no_update, False, no_update, 
+            return ([graph_component], no_update, False, no_update, 
                     new_state, new_key, False, None)
         else:
-            print(f"Node '{clicked}' already clicked.")
-            return [no_update] * 9 
+            return [no_update] * 8 
