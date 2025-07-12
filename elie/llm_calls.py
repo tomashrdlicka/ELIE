@@ -1,8 +1,6 @@
 import os
 import json
 import requests
-from google import genai
-from google.genai import types
 from elie.prompting import *
 
 # READ modal LLM API endpoint and key from environment variables

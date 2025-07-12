@@ -1,12 +1,9 @@
 import os
-import json
-import requests
 from google import generativeai as genai # Updated import for generativeai
-from google.generativeai import types
 
-# Assuming elie.prompting is a custom module, we'll keep its import.
+# Assuming prompting is a custom module, we'll keep its import.
 # If it's not relevant to the Gemini API, you might remove it.
-from elie.prompting import build_further_prompt, parse_terms # Assuming these functions are used
+from prompting import build_further_prompt, parse_terms # Assuming these functions are used
 
 # Configure the Gemini API key
 # It's highly recommended to load this from environment variables for security.
