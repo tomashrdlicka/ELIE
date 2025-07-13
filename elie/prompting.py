@@ -15,6 +15,9 @@ def build_starter_prompt(concept):
     
 
 def build_further_prompt(concept, excluded_concepts, included_concepts):
+    print("Further prompt")
+    print(f"Excluded concepts: {excluded_concepts}")
+    print(f"Included concepts: {included_concepts}")
     return (
         f"Given that I want to understand {concept}, give me a comma-separated list of concepts "
         f"which are necessary to understand {concept}. Do not include anything else in your answer. "
@@ -27,7 +30,7 @@ def build_further_prompt(concept, excluded_concepts, included_concepts):
     )
 
 
-def build_short_final_prompt(concept, included_concepts, excluded_concepts):
+def build_short_final_prompt(concept, excluded_concepts, included_concepts):
     return (
         f"Given that I understand {', '.join(included_concepts)} and I do not understand {', '.join(excluded_concepts)}, "
         f"please explain {concept} to me. Make the explanation concise and clear and make sure to take into account what "
@@ -37,7 +40,7 @@ def build_short_final_prompt(concept, included_concepts, excluded_concepts):
         f"Make sure that the explanation is very concise and to the point. Do not repeat what I already know."
     )
     
-def build_long_final_prompt(concept, included_concepts, excluded_concepts):
+def build_long_final_prompt(concept, excluded_concepts, included_concepts):
     return (
         f"Given that I understand {', '.join(included_concepts)} and I do not understand {', '.join(excluded_concepts)}, "
         f"please explain {concept} to me. Make the explanation clear and make sure to take into account what "

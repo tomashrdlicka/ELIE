@@ -51,7 +51,10 @@ COLORS = {
     "neutral_medium": "#555555",
     "neutral_light": "#888888",
     "border_color": "#555555",
-    "black": "black"
+    "black": "black",
+    "brown": "#B87333",
+    "white": "#FAF9F6",
+    "wheat": "#F5DEB3"
 }
 
 # === BUTTON STYLES ===
@@ -244,9 +247,17 @@ HOW_IT_WORKS_MD = """## How It Works
 
 2. **Get a baseline:** ELIE shows you an initial explanation and a web of related concepts (e.g. "complex numbers", "rotation", "linear algebra").
 
-3. **Click what you do not know:** Select any unfamiliar node—e.g. "linear algebra"—and ELIE refines the explanation.
+3. **Click what you do not know:** Select any unfamiliar node—e.g. "linear algebra"—and help ELIE understand your knowledge base.
 
-4. **Iterate to expertise:** Keep choosing unknown concepts; the map updates and the explanation sharpens until it's perfectly pitched to your expertise.
+4. **Iterate to expertise:** Keep choosing unknown concepts; the map updates until it's perfectly pitched to your expertise.
+
+4. **Get perfect explanation:** Get a new or longer explanation once you're done.
+
+**Controls:**
+- \u21bb Regenerate the current explanation
+- \U0001F4DA Toggle between short and detailed explanations
+
+**Found the perfect explanation?** Choose a new term from the suggested concepts to continue learning!
 """
 
 # === HTML TEMPLATE ===

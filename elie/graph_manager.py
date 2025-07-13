@@ -149,7 +149,7 @@ class GraphManager:
         node_size_base = GRAPH_CONFIG["node_size_base"]
         node_size_multiplier = GRAPH_CONFIG["node_size_multiplier"]
         
-        xs, ys, labels, colors, sizes = [], [], [], [], []
+        xs, ys, labels, colors, sizes, opacities = [], [], [], [], [], []
         
         # Root node size gently decreases as more nodes are added, but never below minimum
         root_size = max(root_size_min, root_size_base - 2 * (len(positions) - 1))
@@ -182,18 +182,27 @@ class GraphManager:
             if node == "start":
                 color = COLORS["black"]
             elif node == last_clicked:
-                color = COLORS["accent_green"]  # Light green for most recently clicked
+                color = COLORS["white"]  # Light green for most recently clicked
             elif node in clicked_nodes:
-                color = COLORS["accent_green_dark"]  # Dark green for previously clicked
+                color = COLORS["wheat"]  # Dark green for previously clicked
             else:
-                color = COLORS["neutral_gray"]
+                color = COLORS["accent_green"]
             
             colors.append(color)
+            
+            # Opacity logic: reduce opacity for other nodes when a node is clicked (not expanded)
+            if last_clicked and last_clicked != "start" and last_clicked not in clicked_nodes_list:
+                # A node was just clicked but not yet expanded - dim all nodes during loading
+                opacity = 0.4  # Reduce opacity during loading
+            else:
+                opacity = 1.0  # Normal state - high opacity when not loading
+            
+            opacities.append(opacity)
         
-        return xs, ys, labels, colors, sizes
+        return xs, ys, labels, colors, sizes, opacities
     
     @staticmethod
-    def calculate_edge_properties(node_data, positions, clicked_nodes_list):
+    def calculate_edge_properties(node_data, positions, clicked_nodes_list, last_clicked=None):
         """Calculate visual properties for edges"""
         clicked_nodes = set(clicked_nodes_list)
         edge_xs, edge_ys, edge_colors = [], [], []
@@ -205,10 +214,27 @@ class GraphManager:
                 edge_xs += [px, x, None]
                 edge_ys += [py, y, None]
                 
+                # Determine edge color and opacity
                 if node in clicked_nodes:
-                    edge_colors.append('rgba(2,171,19,0.35)')
+                    base_color = 'rgba(245,222,179,0.5)'
                 else:
-                    edge_colors.append(COLORS["neutral_light"])
+                    base_color = COLORS["accent_green_dark"]
+                
+                # Apply opacity reduction when a node is clicked (not expanded)
+                if last_clicked and last_clicked != "start" and last_clicked not in clicked_nodes_list:
+                    # A node was just clicked but not yet expanded - dim all edges during loading
+                    if node in clicked_nodes:
+                        edge_color = 'rgba(245,222,179,0.2)'  # Dimmed wheat color for loading
+                    else:
+                        # Convert hex color to rgba with reduced opacity for loading
+                        if base_color == COLORS["accent_green_dark"]:
+                            edge_color = 'rgba(4,112,21,0.16)'  # Dimmed accent_green_dark for loading
+                        else:
+                            edge_color = 'rgba(245,222,179,0.2)'  # Dimmed for loading
+                else:
+                    edge_color = base_color  # Normal state - full opacity when not loading
+                
+                edge_colors.append(edge_color)
         
         return edge_xs, edge_ys, edge_colors
     
@@ -250,7 +276,7 @@ class GraphManager:
         return edge_traces
     
     @staticmethod
-    def create_node_trace(xs, ys, labels, colors, sizes, positions):
+    def create_node_trace(xs, ys, labels, colors, sizes, opacities, positions):
         """Create plotly trace for nodes"""
         # Set customdata so that the start node is unclickable
         customdata = []
@@ -260,16 +286,32 @@ class GraphManager:
             else:
                 customdata.append(node)
         
+        # Create text colors with opacity applied
+        text_colors = []
+        for opacity in opacities:
+            if opacity < 1.0:
+                # Convert text color to rgba with reduced opacity
+                text_colors.append(f'rgba(192,192,192,{opacity})')  # text_primary with opacity
+            else:
+                text_colors.append(COLORS["text_primary"])
+        
         return go.Scatter(
             x=xs, y=ys,
             mode="markers+text",
             text=labels,
             textposition="top center",
-            textfont=dict(color=COLORS["text_primary"], size=12),
+            textfont=dict(color=text_colors, size=12),
+            # Add hover template with node name
+            hovertemplate='<b>%{text}</b><extra></extra>',  # Show node name in bold
+            hoverlabel=dict(
+                bgcolor='rgba(0,0,0,0.8)',  # Semi-transparent dark background for contrast
+                bordercolor='white',  # White border
+                font=dict(color='white', size=16)  # White text, larger size
+            ),
             marker=dict(
                 size=sizes,
                 color=colors,
-                opacity=1,
+                opacity=opacities,  # Use the opacity values
                 line=dict(width=2, color='#444444')
             ),
             customdata=customdata,
@@ -306,19 +348,19 @@ class GraphManager:
         positions = GraphManager.rescale_positions_if_needed(positions)
         
         # Calculate visual properties
-        xs, ys, labels, colors, sizes = GraphManager.calculate_node_visual_properties(
+        xs, ys, labels, colors, sizes, opacities = GraphManager.calculate_node_visual_properties(
             node_data, positions, clicked_nodes_list, last_clicked, node_flash
         )
         
         edge_xs, edge_ys, edge_colors = GraphManager.calculate_edge_properties(
-            node_data, positions, clicked_nodes_list
+            node_data, positions, clicked_nodes_list, last_clicked
         )
         
         x_range, y_range = GraphManager.calculate_view_range(positions, focus_node)
         
         # Create traces
         edge_traces = GraphManager.create_edge_traces(edge_xs, edge_ys, edge_colors)
-        node_trace = GraphManager.create_node_trace(xs, ys, labels, colors, sizes, positions)
+        node_trace = GraphManager.create_node_trace(xs, ys, labels, colors, sizes, opacities, positions)
         layout = GraphManager.create_layout(x_range, y_range)
         
         # Create and return figure

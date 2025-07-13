@@ -137,7 +137,8 @@ class CallbackHandlers:
              Output("app-state-store", "data", allow_duplicate=True),
              Output("graph-key", "data", allow_duplicate=True), 
              Output("input-flash", "data", allow_duplicate=True), 
-             Output("node-flash", "data", allow_duplicate=True)],
+             Output("node-flash", "data", allow_duplicate=True),
+             Output('explanation-length-flag', 'data', allow_duplicate=True)],
             [Input({'type': 'suggested-term', 'term': ALL}, 'n_clicks')],
             [State({'type': 'suggested-term', 'term': ALL}, 'id'), 
              State("app-state-store", "data"), 
@@ -149,7 +150,7 @@ class CallbackHandlers:
                                       explanation_length_flag):
             """Handle suggested term button clicks - GRAPH AND STATE ONLY"""
             if not ctx.triggered or not all_n_clicks or not all_btn_ids:
-                return [no_update] * 8
+                return [no_update] * 9
             
             # Find which button was clicked
             clicked_idx = None
@@ -159,13 +160,17 @@ class CallbackHandlers:
                     break
             
             if clicked_idx is None:
-                return [no_update] * 8
+                return [no_update] * 9
             
             term = all_btn_ids[clicked_idx]['term']
             print(f"[SUGGESTED TERM CLICKED] {term}")
             
-            return self._handle_concept_submission(term, explanation_length_flag, 
+            # Always use 'short' for new concepts and reset the flag
+            result = self._handle_concept_submission(term, 'short', 
                                                  graph_key, flash_input=True)
+            
+            # Add 'short' as the explanation-length-flag output (convert tuple to list first)
+            return list(result) + ['short']
     
     def register_control_callbacks(self):
         """Register callbacks for control buttons (toggle, reload)"""
