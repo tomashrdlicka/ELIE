@@ -33,7 +33,7 @@ def create_data_stores(initial_state):
         dcc.Store(id='input-flash', data=False),
         dcc.Store(id='node-flash', data=None),
         dcc.Store(id='submit-btn-flash', data=False),
-        dcc.Store(id='explanation-length-flag', data='short', storage_type='local'),
+        dcc.Store(id='explanation-length-flag', data='short'),  # Removed storage_type='local' to prevent persistence
         dcc.Store(id='toggle-animating', data=False),
         dcc.Store(id='reload-spinning', data=False),
         dcc.Store(id='reload-triggered', data=False),
@@ -60,10 +60,8 @@ def create_toggle_button(length_flag="short"):
     """Create the toggle explanation length button with simple visual feedback"""
     icon = ICONS["toggle"]
     
-    # Green outline when mode is 'long'
-    border = "2px solid transparent"
-    if length_flag == "long":
-        border = f"2px solid {COLORS['accent_green']}"
+    # Always have a border, just change its color
+    border_color = COLORS['accent_green'] if length_flag == "long" else "transparent"
     
     return html.Button(
         icon,
@@ -74,16 +72,21 @@ def create_toggle_button(length_flag="short"):
             "background": "none",
             "color": COLORS["text_primary"],
             "fontSize": "2.1em",
-            "padding": "0 34px",
             "verticalAlign": "middle",
             "float": "right",
-            "minWidth": "64px",
-            "height": "48px",
-            "borderRadius": "12px",
+            "marginLeft": "auto",  # This will push the button to the right
+            "minWidth": "1.5em",
+            "height": "1.5em",
+            "borderRadius": "0.75em",
             "transition": "all 0.2s ease",
-            "border": border,
+            "border": f"2px solid {border_color}",
+            "boxSizing": "border-box",  # Ensure border is included in element size
+            "padding": "0",  # Remove padding to prevent size changes
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "center"
         },
-        className="toggle-btn"  # Add CSS class for hover effects
+        className="toggle-btn"
     )
 
 
@@ -94,16 +97,16 @@ def create_reload_button(spinning=False):
         "background": "none",
         "color": COLORS["text_primary"],
         "fontSize": "2.1em",
-        "marginRight": "16px",
         "padding": "0",
         "verticalAlign": "middle",
-        "minWidth": "64px",
-        "height": "48px",
+        "minWidth": "1.5em",
+        "height": "1.5em",
         "transition": "transform 0.2s",
         "transformOrigin": "center",
-        "display": "flex",  # Add flex display
-        "alignItems": "center",  # Center vertically
-        "justifyContent": "center",  # Center horizontally
+        "display": "flex",
+        "alignItems": "center",
+        "justifyContent": "center",
+        "flex": "0 0 auto"
     }
     
     # Use CSS class for spinning animation instead of inline animation
@@ -124,6 +127,10 @@ def create_submit_button(flash=False):
     style = {
         **BUTTON_STYLES["base"],
         **BUTTON_STYLES["submit"],
+        "width": "2.2rem",
+        "height": "2.2rem",
+        "right": "0.4rem",
+        "fontSize": "1.25rem",
         "transition": f"box-shadow {ANIMATION_CONFIG['submit_flash_duration'] / 1000}s, background {ANIMATION_CONFIG['submit_flash_duration'] / 1000}s, color {ANIMATION_CONFIG['submit_flash_duration'] / 1000}s"
     }
     
@@ -131,14 +138,15 @@ def create_submit_button(flash=False):
         style.update({
             "backgroundColor": "#fff",
             "color": COLORS["accent_green"],
-            "boxShadow": "0 0 24px 8px #f0fff0"
+            "boxShadow": "0 0 1.5rem 0.5rem #f0fff0"
         })
     
     return html.Button(
         ICONS["submit"],
         id='submit-btn',
         n_clicks=0,
-        style=style
+        style=style,
+        className="submit-btn"
     )
 
 
@@ -177,7 +185,12 @@ def create_input_field():
         placeholder="Enter root concept...",
         debounce=True,
         n_submit=0,
-        style=INPUT_STYLES["main"]
+        style={
+            **INPUT_STYLES["main"],
+            "width": "100%",
+            "fontSize": "1.1rem",
+            "padding": "0.75rem 2.8rem 0.75rem 1.75rem"  # Convert px to rem
+        }
     )
 
 
@@ -204,25 +217,27 @@ def create_info_box_content(term=None, explanation="", length_flag="short", spin
     # Return info box with controls
     return [
         html.Div([
-            create_reload_button(spinning=spinning),
+            html.Div(create_reload_button(spinning=spinning), style={"flex": "1"}),
             html.H4(
                 f"About {term}",
+                id="about-term-heading",
                 style={
                     "color": COLORS["text_primary"],
                     "margin": 0,
-                    "marginLeft": "10px",
                     "fontWeight": 700,
                     "fontSize": "1.2em",
-                    "verticalAlign": "middle"
+                    "flex": "2",
+                    "textAlign": "center",
+                    "minWidth": "8em"  # Ensure enough space for the text
                 }
             ),
-            create_toggle_button(length_flag)
+            html.Div(create_toggle_button(length_flag), style={"flex": "1", "display": "flex", "justifyContent": "flex-end"})
         ], style={
             "display": "flex",
             "alignItems": "center",
-            "gap": "8px",
-            "marginBottom": "10px",
-            "width": "100%"
+            "marginBottom": "1rem",
+            "width": "100%",
+            "gap": "1rem"
         }),
         dcc.Markdown(explanation)
     ]

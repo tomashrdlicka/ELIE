@@ -277,7 +277,7 @@ class CallbackHandlers:
             [Input('app-state-store', 'data'),
              Input('explanation-length-flag', 'data'),
              Input('reload-spinning', 'data')],
-            prevent_initial_call=False
+            prevent_initial_call='initial_duplicate'  # Allow initial call but handle duplicates
         )
         def update_info_box_on_state_change(state, length_flag, reload_spinning):
             """Update info box when state, flag, or reload state changes - EXCLUSIVE OWNERSHIP"""
@@ -301,21 +301,34 @@ class CallbackHandlers:
             return create_suggested_concepts_section(suggestions)
         
         @self.app.callback(
-            Output("centered-input-overlay", "style"),
+            [Output("centered-input-overlay", "style"),
+             Output("submit-btn-flash", "data", allow_duplicate=True)],
             Input("input-overlay-visible", "data"),
+            prevent_initial_call=True
         )
         def toggle_overlay(visible):
-            """Toggle input overlay visibility"""
+            """Toggle input overlay visibility and reset submit button flash"""
             base_style = {
-                "position": "absolute", "left": "50%", "top": "55%", "zIndex": 10,
+                "position": "absolute",
+                "left": "50%",
+                "top": "50%",
+                "transform": "translate(-50%, -50%)",
+                "zIndex": 10,
+                "width": "100%",
+                "display": "flex",
+                "justifyContent": "center",
+                "alignItems": "center",
                 "transition": "opacity 0.3s ease, transform 0.3s ease"
             }
             if visible:
-                return {**base_style, "transform": "translate(-50%, -50%)", 
-                       "opacity": 1, "pointerEvents": "auto"}
+                return {**base_style, 
+                       "opacity": 1, 
+                       "pointerEvents": "auto"}, False
             else:
-                return {**base_style, "transform": "translate(-50%, -65%)", 
-                       "opacity": 0, "pointerEvents": "none"}
+                return {**base_style, 
+                       "transform": "translate(-50%, -40%)",  # Move up when hidden
+                       "opacity": 0, 
+                       "pointerEvents": "none"}, False
     
     # Helper methods for complex interactions
     def _handle_file_upload(self, upload_contents, explanation_length_flag, graph_key):

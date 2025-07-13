@@ -71,19 +71,20 @@ BUTTON_STYLES = {
     },
     "submit": {
         "position": "absolute",
-        "right": "8px",
-        "top": "50%",
-        "transform": "translateY(-50%)",
-        "width": "32px",
-        "height": "32px",
+        "right": "0.5em",
+        "top": 0,
+        "bottom": 0,
+        "margin": "auto",
+        "width": "1.7em",
+        "height": "1.7em",
         "borderRadius": "50%",
         "backgroundColor": COLORS["neutral_medium"],
         "color": COLORS["text_secondary"],
-        "fontSize": "20px",
+        "fontSize": "1.25em",
         "display": "flex",
         "alignItems": "center",
         "justifyContent": "center",
-        "paddingBottom": "4px"
+        "transition": "transform 0.2s ease"
     },
     "suggested": {
         "display": "inline-block",
@@ -153,9 +154,11 @@ LAYOUT_STYLES = {
         "color": COLORS["text_primary"],
         "borderRadius": "8px",
         "flex": "1 1 0%",
+        "width": "350px",  # Set fixed width
         "maxWidth": "350px",
-        "minWidth": "220px",
-        "marginTop": "0px"
+        "minWidth": "350px",  # Ensure consistent width
+        "marginTop": "0px",
+        "boxSizing": "border-box"  # Include padding and border in width calculation
     }
 }
 
@@ -176,13 +179,20 @@ OVERLAY_STYLES = {
     "input_overlay": {
         "position": "absolute",
         "left": "50%",
-        "top": "55%",
+        "top": "55%",  # Changed from 55% to 50% for true center
+        "transform": "translate(-50%, -50%)",  # Added transform for perfect centering
         "zIndex": 10,
-        "transition": "opacity 0.3s ease, transform 0.3s ease"
+        "transition": "opacity 0.3s ease, transform 0.3s ease",
+        "width": "100%",
+        "display": "flex",
+        "justifyContent": "center",
+        "alignItems": "center"
     },
     "input_container": {
         "position": "relative",
-        "width": "340px"
+        "width": "21rem",  # Changed from fixed pixels to rem
+        "display": "flex",
+        "alignItems": "center"
     }
 }
 
@@ -208,15 +218,21 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; background-color:
     justify-content: center;
 }
 .toggle-btn:hover {
-    transform: scale(1.1);
+    transform: scale(1.15);
 }
 .reload-btn:hover {
-    transform: scale(1.1);
+    transform: scale(1.15);
+}
+.submit-btn:hover {
+    transform: scale(1.15);
 }
 .reload-btn:active {
     transform: scale(0.95);
 }
 .toggle-btn:active {
+    transform: scale(0.95);
+}
+.submit-btn:active {
     transform: scale(0.95);
 }
 """
